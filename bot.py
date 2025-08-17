@@ -99,6 +99,7 @@ async def on_message(message):
                 await message.channel.send(bot_response)
         except Exception as e:
             print(f"An error occurred: {e}")
+            conversation_history[channel_id].pop() # Remove user message on error
             await message.channel.send("Sorry, I had a little hiccup. Baka!")
 
 

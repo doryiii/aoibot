@@ -107,6 +107,27 @@ class TestAoiBot(unittest.IsolatedAsyncioTestCase):
         # Assertions
         bot.newchat.callback.assert_awaited_once_with(interaction, prompt=None)
 
+    @patch('bot.openai.OpenAI')
+    async def test_on_message_api_error(self, MockOpenAI):
+        # Mock the OpenAI client to raise an error
+        mock_openai_instance = MockOpenAI.return_value
+        mock_openai_instance.chat.completions.create.side_effect = Exception("API Error")
+
+        # Mock a Discord message
+        message = AsyncMock()
+        message.author = MagicMock()
+        message.author.bot = False
+        message.channel = AsyncMock()
+        message.channel.id = 123
+        message.content = f"<@!{bot.bot.user.id}> This will fail"
+        message.attachments = []
+
+        # Call the on_message event handler
+        await bot.on_message(message)
+
+        # Assertions
+        bot.on_message.assert_awaited_once_with(message)
+
 
 if __name__ == '__main__':
     unittest.main()
