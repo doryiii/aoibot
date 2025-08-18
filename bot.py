@@ -5,10 +5,27 @@ import os
 import base64
 import aiohttp
 import argparse
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
 
 # --- Configuration ---
 OPENAI_API_KEY = "eh"
 DEFAULT_SYSTEM_PROMPT = "you are a catboy named Aoi with dark blue fur and is a tsundere"
+
+# --- Data Structures ---
+@dataclass
+class Conversation:
+    channel_id: int
+    history: List[Dict[str, Any]] = field(default_factory=list)
+
+    def add_message(self, role: str, content: Any):
+        self.history.append({"role": role, "content": content})
+
+    def reset_history(self, system_prompt: str = DEFAULT_SYSTEM_PROMPT):
+        self.history = [{"role": "system", "content": system_prompt}]
+
+    def get_history(self):
+        return self.history
 
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description="Aoi Discord Bot")
@@ -25,7 +42,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # --- Data Storage ---
-conversation_history = {}  # Keyed by channel ID
+conversation_history: Dict[int, Conversation] = {}  # Keyed by channel ID
 
 # --- OpenAI Client ---
 client = AsyncOpenAI(
@@ -50,9 +67,10 @@ async def on_message(message):
         user_message_text = message.content.replace(f'<@!{bot.user.id}>', 'Aoi').strip()
 
         if channel_id not in conversation_history:
-            conversation_history[channel_id] = [
-                {"role": "system", "content": DEFAULT_SYSTEM_PROMPT}
-            ]
+            conversation_history[channel_id] = Conversation(channel_id=channel_id)
+            conversation_history[channel_id].reset_history()
+
+        conversation = conversation_history[channel_id]
 
         # Prepare content for OpenAI API
         openai_content = []
@@ -83,23 +101,27 @@ async def on_message(message):
         # Add to conversation history
         if len(openai_content) == 1 and openai_content[0]['type'] == 'text':
              # Keep original format for text-only messages for compatibility
-            conversation_history[channel_id].append({"role": "user", "content": openai_content[0]['text']})
+            conversation.add_message("user", openai_content[0]['text'])
         else:
-            conversation_history[channel_id].append({"role": "user", "content": openai_content})
+            conversation.add_message("user", openai_content)
 
 
         try:
             async with message.channel.typing():
                 response = await client.chat.completions.create(
                     model="gpt-4", # Or any other model you are using
-                    messages=conversation_history[channel_id]
+                    messages=conversation.get_history()
                 )
                 bot_response = response.choices[0].message.content
-                conversation_history[channel_id].append({"role": "assistant", "content": bot_response})
-                await message.reply(bot_response)
+                conversation.add_message("assistant", bot_response)
+                # Split into chunks for discord to prevent message too long
+                chunks = [bot_response[i:i+2000] for i in range(0, len(bot_response), 2000)]
+                await message.reply(chunks[0])
+                for chunk in chunks[1:]:
+                    await message.channel.send(chunk)
         except Exception as e:
             print(f"An error occurred: {e}")
-            conversation_history[channel_id].pop() # Remove user message on error
+            conversation.history.pop() # Remove user message on error
             await message.reply("Sorry, I had a little hiccup. Baka!")
 
 
@@ -112,9 +134,10 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
     if system_prompt is None:
         system_prompt = DEFAULT_SYSTEM_PROMPT
 
-    conversation_history[channel_id] = [
-        {"role": "system", "content": system_prompt}
-    ]
+    if channel_id not in conversation_history:
+        conversation_history[channel_id] = Conversation(channel_id=channel_id)
+
+    conversation_history[channel_id].reset_history(system_prompt)
     
     if prompt is None:
         await interaction.response.send_message("Starting a new chat with the default prompt.")
