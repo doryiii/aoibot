@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-import openai
+from openai import AsyncOpenAI
 import os
 import base64
 import aiohttp
@@ -28,7 +28,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 conversation_history = {}  # Keyed by channel ID
 
 # --- OpenAI Client ---
-client = openai.OpenAI(
+client = AsyncOpenAI(
     base_url=args.base_url,
     api_key=OPENAI_API_KEY,
 )
@@ -90,7 +90,7 @@ async def on_message(message):
 
         try:
             async with message.channel.typing():
-                response = client.chat.completions.create(
+                response = await client.chat.completions.create(
                     model="gpt-4", # Or any other model you are using
                     messages=conversation_history[channel_id]
                 )

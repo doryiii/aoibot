@@ -26,7 +26,7 @@ class TestAoiBot(unittest.IsolatedAsyncioTestCase):
         bot.newchat.callback = AsyncMock()
 
 
-    @patch('bot.openai.OpenAI')
+    @patch('bot.AsyncOpenAI')
     async def test_on_message_text_only(self, MockOpenAI):
         # Mock the OpenAI client and its response
         mock_openai_instance = MockOpenAI.return_value
@@ -50,7 +50,7 @@ class TestAoiBot(unittest.IsolatedAsyncioTestCase):
         bot.on_message.assert_awaited_once_with(message)
 
 
-    @patch('bot.openai.OpenAI')
+    @patch('bot.AsyncOpenAI')
     @patch('bot.aiohttp.ClientSession')
     async def test_on_message_with_image(self, MockClientSession, MockOpenAI):
         # Mock the OpenAI client
@@ -107,7 +107,7 @@ class TestAoiBot(unittest.IsolatedAsyncioTestCase):
         # Assertions
         bot.newchat.callback.assert_awaited_once_with(interaction, prompt=None)
 
-    @patch('bot.openai.OpenAI')
+    @patch('bot.AsyncOpenAI')
     async def test_on_message_api_error(self, MockOpenAI):
         # Mock the OpenAI client to raise an error
         mock_openai_instance = MockOpenAI.return_value
