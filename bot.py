@@ -96,11 +96,11 @@ async def on_message(message):
                 )
                 bot_response = response.choices[0].message.content
                 conversation_history[channel_id].append({"role": "assistant", "content": bot_response})
-                await message.channel.send(bot_response)
+                await message.reply(bot_response)
         except Exception as e:
             print(f"An error occurred: {e}")
             conversation_history[channel_id].pop() # Remove user message on error
-            await message.channel.send("Sorry, I had a little hiccup. Baka!")
+            await message.reply("Sorry, I had a little hiccup. Baka!")
 
 
 # --- Slash Commands ---
