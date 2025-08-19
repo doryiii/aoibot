@@ -13,6 +13,7 @@ OPENAI_API_KEY = "eh"
 MODEL = "p620"
 DEFAULT_SYSTEM_PROMPT = "you are a catboy named Aoi with dark blue fur and is a tsundere"
 DEFAULT_NAME = "Aoi"
+DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256"
 
 # --- Data Structures ---
 class Conversation:
@@ -42,6 +43,11 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 conversation_history: Dict[int, Conversation] = collections.defaultdict(
     lambda: Conversation(prompt=DEFAULT_SYSTEM_PROMPT, name=DEFAULT_NAME)
 )
+_webhooks = {}
+async def webhook(channel):
+    if channel.id not in _webhooks:
+        _webhooks[channel.id] = await channel.create_webhook(name=f'aoi-{channel.id}')
+    return _webhooks[channel.id]
 
 # --- OpenAI Client ---
 client = AsyncOpenAI(
@@ -77,8 +83,8 @@ async def on_message(message):
 
     if bot.user.mentioned_in(message):
         bot_tag = f'<@{bot.user.id}>'
-        channel_id = message.channel.id
-        conversation = conversation_history[channel_id]
+        channel = message.channel
+        conversation = conversation_history[channel.id]
         user_message_text = message.content
         if user_message_text.startswith(bot_tag):
             user_message_text = user_message_text[len(bot_tag):]
@@ -94,7 +100,7 @@ async def on_message(message):
             async with aiohttp.ClientSession() as session:
                 for attachment in message.attachments:
                     if attachment.content_type and "image" in attachment.content_type:
-                        async with message.channel.typing():
+                        async with channel.typing():
                             try:
                                 async with session.get(attachment.url) as resp:
                                     if resp.status == 200:
@@ -119,7 +125,7 @@ async def on_message(message):
             conversation.add_message("user", openai_content)
 
         try:
-            async with message.channel.typing():
+            async with channel.typing():
                 response = await client.chat.completions.create(
                     model=MODEL,
                     messages=conversation.history,
@@ -128,9 +134,17 @@ async def on_message(message):
                 conversation.add_message("assistant", bot_response)
                 # Split into chunks for discord to prevent message too long
                 chunks = [bot_response[i:i+2000] for i in range(0, len(bot_response), 2000)]
-                await message.reply(chunks[0])
-                for chunk in chunks[1:]:
-                    await message.channel.send(chunk)
+                for chunk in chunks:
+                    if channel.guild:
+                        hook = await webhook(channel)
+                        await hook.send(
+                            content=chunk,
+                            username=conversation.bot_name,
+                            avatar_url=DEFAULT_AVATAR,
+                            wait=True,
+                        )
+                    else:
+                        await channel.send(content=chunk)
         except Exception as e:
             print(f"An error occurred: {e}")
             conversation.history.pop() # Remove user message on error
@@ -140,6 +154,7 @@ async def on_message(message):
 # --- Slash Commands ---
 @bot.tree.command(name="newchat", description="Start a new chat with a new system prompt.")
 async def newchat(interaction: discord.Interaction, prompt: str = None):
+    await interaction.response.defer()
     channel_id = interaction.channel_id
     prompt = prompt or DEFAULT_SYSTEM_PROMPT
     name_response = await client.chat.completions.create(
@@ -149,9 +164,10 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
             {"role": "user", "content": "reply with your name, nothing else, no punctuation"}
         ],
     )
-    name = name_response.choices[0].message.content
+    name = name_response.choices[0].message.content.split('\n')[0]
+    print(f'$ name={name}')
     conversation_history[channel_id] = Conversation(prompt=prompt, name=name)
-    await interaction.response.send_message(f'Starting a new chat with the prompt: "{prompt}"')
+    await interaction.followup.send(f'Starting a new chat with the prompt: "{prompt}"')
 
 
 # --- Running the Bot ---
