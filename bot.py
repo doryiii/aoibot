@@ -21,15 +21,26 @@ class Conversation:
         self.history = [{"role": "system", "content": prompt}]
         self.bot_name = name
 
-    def add_message(self, role, content):
-        self.history.append({"role": role, "content": content})
+    def add_message_pair(self, user, assistant):
+        self.history.extend([
+            {"role": "user", "content": user},
+            {"role": "assistant", "content": assistant},
+        ])
 
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description="Aoi Discord Bot")
-parser.add_argument('--base_url', type=str, required=True,
-                    help='The base URL for the OpenAI API.')
-parser.add_argument('--discord_token', type=str, required=True,
-                    help='The Discord bot token.')
+parser.add_argument(
+    '--base_url',
+    type=str,
+    required=True,
+    help='The base URL for the OpenAI API.',
+)
+parser.add_argument(
+    '--discord_token',
+    type=str,
+    required=True,
+    help='The Discord bot token.',
+)
 args = parser.parse_args()
 
 # --- Bot Setup ---
@@ -41,7 +52,7 @@ bot = commands.Bot(command_prefix="/", intents=intents)
 # --- Data Storage ---
 # Keyed by channel ID
 conversation_history: Dict[int, Conversation] = collections.defaultdict(
-    lambda: Conversation(prompt=DEFAULT_SYSTEM_PROMPT, name=DEFAULT_NAME)
+    lambda: Conversation(prompt=DEFAULT_SYSTEM_PROMPT, name=DEFAULT_NAME),
 )
 _webhooks = {}
 async def webhook(channel):
@@ -95,6 +106,8 @@ async def on_message(message):
         openai_content = []
         if user_message_text:
             openai_content.append({"type": "text", "text": user_message_text})
+        else:
+            openai_content.append({"type": "text", "text": "."})
 
         if message.attachments:
             async with aiohttp.ClientSession() as session:
@@ -114,24 +127,14 @@ async def on_message(message):
                             except Exception as e:
                                 print(f"Error downloading or processing attachment: {e}")
 
-        if not openai_content: # Don't send empty messages
-            return
-
-        # Add to conversation history
-        if len(openai_content) == 1 and openai_content[0]['type'] == 'text':
-             # Keep original format for text-only messages for compatibility
-            conversation.add_message("user", openai_content[0]['text'])
-        else:
-            conversation.add_message("user", openai_content)
-
+        request = conversation.history + [{"role": "user", "content": openai_content}]
         try:
             async with channel.typing():
                 response = await client.chat.completions.create(
-                    model=MODEL,
-                    messages=conversation.history,
+                    model=MODEL, messages=request,
                 )
                 bot_response = response.choices[0].message.content
-                conversation.add_message("assistant", bot_response)
+                conversation.add_message_pair(openai_content, bot_response)
                 # Split into chunks for discord to prevent message too long
                 chunks = [bot_response[i:i+2000] for i in range(0, len(bot_response), 2000)]
                 for chunk in chunks:
@@ -147,7 +150,6 @@ async def on_message(message):
                         await channel.send(content=chunk)
         except Exception as e:
             print(f"An error occurred: {e}")
-            conversation.history.pop() # Remove user message on error
             await message.reply("Sorry, I had a little hiccup. Baka!")
 
 
