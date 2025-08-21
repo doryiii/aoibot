@@ -1,21 +1,13 @@
 import collections
 import discord
 from discord.ext import commands
-from openai import AsyncOpenAI
 import os
-import base64
-import aiohttp
 import argparse
 from typing import List, Dict, Any
 
+from llm_client import Conversation
+
 # --- Configuration ---
-OPENAI_API_KEY = "eh"
-MODEL = "p620"
-DEFAULT_SYSTEM_PROMPT = (
-    "you are a catboy named Aoi with dark blue fur and is a tsundere"
-)
-NAME_PROMPT = "reply with your name, nothing else, no punctuation"
-DEFAULT_NAME = "Aoi"
 DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256"
 
 # --- Command Line Arguments ---
@@ -36,23 +28,8 @@ intents.messages = True
 intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
-# --- OpenAI Client ---
-client = AsyncOpenAI(base_url=args.base_url, api_key=OPENAI_API_KEY)
 
 # --- Helpers ---
-async def get_user_from_id(ctx, userid):
-    if ctx.guild:
-        user = await ctx.guild.fetch_member(userid)
-    else:
-        user = await bot.fetch_user(userid)
-    return user.display_name
-
-async def get_user_from_mention(ctx, mention):
-    match = re.findall(r"<@!?(\d+)>", mention)
-    if not match:
-        return mention
-    return await get_user_from_id(ctx, int(match[0]))
-
 async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
     chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
     messages = []
@@ -71,67 +48,9 @@ async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
     return messages
 
 
-class Conversation:
-    def __init__(self, prompt, name):
-        self.history = [{"role": "system", "content": prompt}]
-        self.bot_name = name
-        self.last_messages = []
-
-    def add_message_pair(self, user, assistant):
-        self.history.extend([
-            {"role": "user", "content": user},
-            {"role": "assistant", "content": assistant},
-        ])
-
-    async def generate(self, text, media=tuple()):
-        # prepare text part
-        if text:
-            openai_content = [{"type": "text", "text": text}]
-        else:
-            openai_content = [{"type": "text", "text": "."}]
-
-        # prepare images part
-        async with aiohttp.ClientSession() as session:
-            for (content_type, url) in media:
-                if "image" not in content_type:
-                    continue
-                try:
-                    async with session.get(url) as resp:
-                        if resp.status != 200:
-                            raise IOError(f"{url} --> {resp.status}")
-                        image_data = await resp.read()
-                        b64_image = base64.b64encode(image_data).decode('utf-8')
-                        b64_url = f"data:{content_type};base64,{b64_image}"
-                        openai_content.append({
-                            "type": "image_url",
-                            "image_url": {"url": b64_url}
-                        })
-                except Exception as e:
-                    print(f"Error downloading or processing attachment: {e}")
-
-        # send request to openai api and return response
-        request = self.history + [{"role": "user", "content": openai_content}]
-        llm_response = await client.chat.completions.create(
-            model=MODEL, messages=request,
-        )
-        response = llm_response.choices[0].message.content
-        self.add_message_pair(openai_content, response)
-        return response
-
-    async def regenerate(self):
-        llm_response = await client.chat.completions.create(
-            model=MODEL, messages=self.history[:-1]
-        )
-        response = llm_response.choices[0].message.content
-        self.history[-1] = {"role": "assistant", "content": response}
-        return response
-
-
 # --- Data Storage ---
 # Keyed by channel ID
-conversation_history: Dict[int, Conversation] = collections.defaultdict(
-    lambda: Conversation(prompt=DEFAULT_SYSTEM_PROMPT, name=DEFAULT_NAME),
-)
+conversations = {}
 _webhooks = {}
 async def webhook(channel):
     if channel.id not in _webhooks:
@@ -156,7 +75,9 @@ async def on_message(message):
 
     bot_tag = f'<@{bot.user.id}>'
     channel = message.channel
-    conversation = conversation_history[channel.id]
+    if channel.id not in conversations:
+        conversations[channel.id] = await Conversation.create(args.base_url)
+    conversation = conversations[channel.id]
     user_message = message.content
     if user_message.startswith(bot_tag):
         user_message = user_message[len(bot_tag):]
@@ -184,8 +105,9 @@ async def on_reaction_add(reaction, user):
         return
     message = reaction.message
     channel = message.channel
-    conversation = conversation_history[channel.id]
+    conversation = conversations[channel.id]
     if message not in conversation.last_messages:
+        await reaction.clear()
         return
     print(f"_ {user}: {reaction}")
 
@@ -210,18 +132,11 @@ async def on_reaction_add(reaction, user):
 async def newchat(interaction: discord.Interaction, prompt: str = None):
     await interaction.response.defer()
     channel_id = interaction.channel_id
-    system_prompt = prompt or DEFAULT_SYSTEM_PROMPT
-    name_response = await client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": NAME_PROMPT}
-        ],
+    conversation = await Conversation.create(args.base_url, prompt)
+    conversations[channel_id] = conversation
+    await interaction.followup.send(
+        f'Starting a new chat with {conversation.bot_name}: "{prompt}"'
     )
-    name = name_response.choices[0].message.content.split('\n')[0]
-    print(f'$ name={name}')
-    conversation_history[channel_id] = Conversation(prompt=prompt, name=name)
-    await interaction.followup.send(f'Starting a new chat with: "{prompt}"')
 
 
 # --- Running the Bot ---
