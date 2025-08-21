@@ -104,9 +104,7 @@ class Conversation:
         )
         response = llm_response.choices[0].message.content
         self.add_message_pair(openai_content, response)
-
-        # Split into chunks for discord to prevent message too long
-        return [response[i:i+2000] for i in range(0, len(response), 2000)]
+        return response
 
 
 # --- Data Storage ---
@@ -151,7 +149,9 @@ async def on_message(message):
 
     try:
         async with channel.typing():
-            chunks = await conversation.send(user_message, media)
+            response = await conversation.send(user_message, media)
+            # Split into chunks for discord to prevent message too long
+            return [response[i:i+2000] for i in range(0, len(response), 2000)]
             conversation.last_messages = []
             for chunk in chunks:
                 if channel.guild:
