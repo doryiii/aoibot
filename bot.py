@@ -11,7 +11,9 @@ from typing import List, Dict, Any
 # --- Configuration ---
 OPENAI_API_KEY = "eh"
 MODEL = "p620"
-DEFAULT_SYSTEM_PROMPT = "you are a catboy named Aoi with dark blue fur and is a tsundere"
+DEFAULT_SYSTEM_PROMPT = (
+    "you are a catboy named Aoi with dark blue fur and is a tsundere"
+)
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
 DEFAULT_NAME = "Aoi"
 DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256"
@@ -19,15 +21,11 @@ DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description="Aoi Discord Bot")
 parser.add_argument(
-    '--base_url',
-    type=str,
-    required=True,
+    '--base_url', type=str, required=True,
     help='The base URL for the OpenAI API.',
 )
 parser.add_argument(
-    '--discord_token',
-    type=str,
-    required=True,
+    '--discord_token', type=str, required=True,
     help='The Discord bot token.',
 )
 args = parser.parse_args()
@@ -39,10 +37,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="/", intents=intents)
 
 # --- OpenAI Client ---
-client = AsyncOpenAI(
-    base_url=args.base_url,
-    api_key=OPENAI_API_KEY,
-)
+client = AsyncOpenAI(base_url=args.base_url, api_key=OPENAI_API_KEY)
 
 # --- Helpers ---
 async def get_user_from_id(ctx, userid):
@@ -57,6 +52,23 @@ async def get_user_from_mention(ctx, mention):
     if not match:
         return mention
     return await get_user_from_id(ctx, int(match[0]))
+
+async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
+    chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
+    messages = []
+    for chunk in chunks:
+        if channel.guild:
+            hook = await webhook(channel)
+            message = await hook.send(
+                content=chunk,
+                username=name,
+                avatar_url=avatar,
+                wait=True,
+            )
+        else:
+            message = await channel.send(content=chunk)
+        messages.append(message)
+    return messages
 
 
 class Conversation:
@@ -115,24 +127,6 @@ class Conversation:
         return response
 
 
-async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
-    chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
-    messages = []
-    for chunk in chunks:
-        if channel.guild:
-            hook = await webhook(channel)
-            message = await hook.send(
-                content=chunk,
-                username=name,
-                avatar_url=avatar,
-                wait=True,
-            )
-        else:
-            message = await channel.send(content=chunk)
-        messages.append(message)
-    return messages
-
-
 # --- Data Storage ---
 # Keyed by channel ID
 conversation_history: Dict[int, Conversation] = collections.defaultdict(
@@ -141,7 +135,8 @@ conversation_history: Dict[int, Conversation] = collections.defaultdict(
 _webhooks = {}
 async def webhook(channel):
     if channel.id not in _webhooks:
-        _webhooks[channel.id] = await channel.create_webhook(name=f'aoi-{channel.id}')
+        hook = await channel.create_webhook(name=f'aoi-{channel.id}')
+        _webhooks[channel.id] = hook
     return _webhooks[channel.id]
 
 
