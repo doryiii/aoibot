@@ -73,7 +73,7 @@ async def on_message(message):
 
     bot_tag = f'<@{bot.user.id}>'
     channel = message.channel
-    conversation = await Conversation.get(channel.id)
+    conversation = await Conversation.get(channel.id, args.base_url)
     user_message = message.content
     if user_message.startswith(bot_tag):
         user_message = user_message[len(bot_tag):]
@@ -91,6 +91,7 @@ async def on_message(message):
         conversation.last_messages = await discord_send(
             channel, response, conversation.bot_name,
         )
+        conversation.save()
     except Exception as e:
         print(f"An error occurred: {e}")
         await message.reply("Sorry, I had a little hiccup. Baka!")
@@ -101,7 +102,7 @@ async def on_reaction_add(reaction, user):
         return
     message = reaction.message
     channel = message.channel
-    conversation = await Conversation.get(channel.id)
+    conversation = await Conversation.get(channel.id, args.base_url)
     if message.id not in conversation.last_messages:
         await reaction.clear()
         return
@@ -114,7 +115,7 @@ async def on_reaction_add(reaction, user):
                     await channel.fetch_message(message_id)
                     for message_id in conversation.last_messages
                 ]
-            except (discord.NotFound, discord.Forbidden):
+            except (discord.NotFound, discord.Forbidden) as e:
                 # don't do anything if any message in the list is not found
                 await reaction.clear()
             for message in messages:
@@ -123,6 +124,7 @@ async def on_reaction_add(reaction, user):
             conversation.last_messages = await discord_send(
                 channel, response, conversation.bot_name,
             )
+            conversation.save()
     except Exception as e:
         print(f"An error occurred: {e}")
         await message.reply("Sorry, I had a little hiccup. Baka!")
@@ -145,3 +147,4 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
 # --- Running the Bot ---
 if __name__ == "__main__":
     bot.run(args.discord_token)
+

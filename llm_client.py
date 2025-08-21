@@ -1,6 +1,7 @@
 import aiohttp
 import base64
 from openai import AsyncOpenAI
+from database import db
 
 API_KEY = "eh"
 MODEL = "p620"
@@ -10,30 +11,44 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
 
-conversations = {}
-
 
 class Conversation:
-    def __init__(self, client, name, prompt):
+    def __init__(self, client, name, prompt, convo_id):
         self.history = [{"role": "system", "content": prompt}]
         self.bot_name = name
         self.last_messages = []
         self.client = client
+        self.id = convo_id
+
+    def __str__(self):
+        return (
+            f"Conversation({self.bot_name}, {self.last_messages}, "
+            f"{self.history}"
+        )
+
+    def save(self):
+        db.save(self.id, self.history, self.bot_name, self.last_messages)
 
     @classmethod
-    async def get(cls, key):
-        if key not in conversations:
-            conversations[key] = await Conversation.create(args.base_url)
-        return conversations[key]
+    async def get(cls, key, base_url):
+        convo_data = db.get(key)
+        if convo_data:
+            history, bot_name, last_messages = convo_data
+            client = AsyncOpenAI(base_url=base_url, api_key=API_KEY)
+            convo = cls(client, bot_name, history[0]['content'], key)
+            convo.history = history
+            convo.last_messages = last_messages
+            return convo
+        return await Conversation.create(key, base_url)
 
     @classmethod
-    async def create(cls, channel_id, base_url, prompt=None):
+    async def create(cls, key, base_url, prompt=None):
         client = AsyncOpenAI(base_url=base_url, api_key=API_KEY)
         if not prompt:
-            convo = cls(client, DEFAULT_NAME, DEFAULT_SYSTEM_PROMPT)
+            convo = cls(client, DEFAULT_NAME, DEFAULT_SYSTEM_PROMPT, key)
         else:
-            convo = cls(client, await cls.get_name(client, prompt), prompt)
-        conversations[channel_id] = convo
+            convo = cls(client, await cls.get_name(client, prompt), prompt, key)
+        convo.save()
         return convo
 
     @classmethod
@@ -95,5 +110,4 @@ class Conversation:
         response = llm_response.choices[0].message.content
         self.history[-1] = {"role": "assistant", "content": response}
         return response
-
 
