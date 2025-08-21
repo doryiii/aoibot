@@ -71,7 +71,7 @@ class Conversation:
             {"role": "assistant", "content": assistant},
         ])
 
-    async def send(self, text, media=tuple()):
+    async def generate(self, text, media=tuple()):
         # prepare text part
         if text:
             openai_content = [{"type": "text", "text": text}]
@@ -105,6 +105,32 @@ class Conversation:
         response = llm_response.choices[0].message.content
         self.add_message_pair(openai_content, response)
         return response
+
+    async def regenerate(self):
+        llm_response = await client.chat.completions.create(
+            model=MODEL, messages=self.history[:-1]
+        )
+        response = llm_response.choices[0].message.content
+        self.history[-1] = {"role": "assistant", "content": response}
+        return response
+
+
+async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
+    chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
+    messages = []
+    for chunk in chunks:
+        if channel.guild:
+            hook = await webhook(channel)
+            message = await hook.send(
+                content=chunk,
+                username=name,
+                avatar_url=avatar,
+                wait=True,
+            )
+        else:
+            message = await channel.send(content=chunk)
+        messages.append(message)
+    return messages
 
 
 # --- Data Storage ---
@@ -149,22 +175,33 @@ async def on_message(message):
 
     try:
         async with channel.typing():
-            response = await conversation.send(user_message, media)
-            # Split into chunks for discord to prevent message too long
-            chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
-            conversation.last_messages = []
-            for chunk in chunks:
-                if channel.guild:
-                    hook = await webhook(channel)
-                    sent_message = await hook.send(
-                        content=chunk,
-                        username=conversation.bot_name,
-                        avatar_url=DEFAULT_AVATAR,
-                        wait=True,
-                    )
-                else:
-                    sent_message = await channel.send(content=chunk)
-                conversation.last_messages.append(sent_message)
+            response = await conversation.generate(user_message, media)
+            conversation.last_messages = await discord_send(
+                channel, response, conversation.bot_name,
+            )
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        await message.reply("Sorry, I had a little hiccup. Baka!")
+
+@bot.event
+async def on_reaction_add(reaction, user):
+    if reaction.emoji != "🔁":
+        return
+    message = reaction.message
+    channel = message.channel
+    conversation = conversation_history[channel.id]
+    if message not in conversation.last_messages:
+        return
+    print(f"_ {user}: {reaction}")
+
+    try:
+        async with channel.typing():
+            for message in conversation.last_messages:
+                await message.delete()
+            response = await conversation.regenerate()
+            conversation.last_messages = await discord_send(
+                channel, response, conversation.bot_name,
+            )
     except Exception as e:
         print(f"An error occurred: {e}")
         await message.reply("Sorry, I had a little hiccup. Baka!")
