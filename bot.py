@@ -63,6 +63,7 @@ class Conversation:
     def __init__(self, prompt, name):
         self.history = [{"role": "system", "content": prompt}]
         self.bot_name = name
+        self.last_messages = []
 
     def add_message_pair(self, user, assistant):
         self.history.extend([
@@ -98,12 +99,14 @@ class Conversation:
 
         # send request to openai api and return response
         request = self.history + [{"role": "user", "content": openai_content}]
-        response = await client.chat.completions.create(
+        llm_response = await client.chat.completions.create(
             model=MODEL, messages=request,
         )
-        bot_response = response.choices[0].message.content
-        self.add_message_pair(openai_content, bot_response)
-        return bot_response
+        response = llm_response.choices[0].message.content
+        self.add_message_pair(openai_content, response)
+
+        # Split into chunks for discord to prevent message too long
+        return [response[i:i+2000] for i in range(0, len(response), 2000)]
 
 
 # --- Data Storage ---
@@ -129,42 +132,42 @@ async def on_ready():
 async def on_message(message):
     if message.author == bot.user:
         return
+    if not bot.user.mentioned_in(message):
+        return
 
-    if bot.user.mentioned_in(message):
-        bot_tag = f'<@{bot.user.id}>'
-        channel = message.channel
-        conversation = conversation_history[channel.id]
-        user_message = message.content
-        if user_message.startswith(bot_tag):
-            user_message = user_message[len(bot_tag):]
-        user_message = user_message.replace(bot_tag, conversation.bot_name).strip()
-        print(f'> {message.author.name}: {user_message}')
+    bot_tag = f'<@{bot.user.id}>'
+    channel = message.channel
+    conversation = conversation_history[channel.id]
+    user_message = message.content
+    if user_message.startswith(bot_tag):
+        user_message = user_message[len(bot_tag):]
+    user_message = user_message.replace(bot_tag, conversation.bot_name).strip()
+    print(f'> {message.author.name}: {user_message}')
 
+    media = []
+    if message.attachments:
+        for attachment in message.attachments:
+            media.append((attachment.content_type, attachment.url))
 
-        media = []
-        if message.attachments:
-            for attachment in message.attachments:
-                media.append((attachment.content_type, attachment.url))
-
-        try:
-            async with channel.typing():
-                response = await conversation.send(user_message, media)
-            # Split into chunks for discord to prevent message too long
-            chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
+    try:
+        async with channel.typing():
+            chunks = await conversation.send(user_message, media)
+            conversation.last_messages = []
             for chunk in chunks:
                 if channel.guild:
                     hook = await webhook(channel)
-                    await hook.send(
+                    sent_message = await hook.send(
                         content=chunk,
                         username=conversation.bot_name,
                         avatar_url=DEFAULT_AVATAR,
                         wait=True,
                     )
                 else:
-                    await channel.send(content=chunk)
-        except Exception as e:
-            print(f"An error occurred: {e}")
-            await message.reply("Sorry, I had a little hiccup. Baka!")
+                    sent_message = await channel.send(content=chunk)
+                conversation.last_messages.append(sent_message)
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        await message.reply("Sorry, I had a little hiccup. Baka!")
 
 
 # --- Slash Commands ---
