@@ -151,7 +151,7 @@ async def on_message(message):
         async with channel.typing():
             response = await conversation.send(user_message, media)
             # Split into chunks for discord to prevent message too long
-            return [response[i:i+2000] for i in range(0, len(response), 2000)]
+            chunks = [response[i:i+2000] for i in range(0, len(response), 2000)]
             conversation.last_messages = []
             for chunk in chunks:
                 if channel.guild:
