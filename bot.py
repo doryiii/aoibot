@@ -44,7 +44,7 @@ async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
             )
         else:
             message = await channel.send(content=chunk)
-        messages.append(message)
+        messages.append(message.id)
     return messages
 
 async def webhook(channel):
@@ -102,14 +102,22 @@ async def on_reaction_add(reaction, user):
     message = reaction.message
     channel = message.channel
     conversation = await Conversation.get(channel.id)
-    if message not in conversation.last_messages:
+    if message.id not in conversation.last_messages:
         await reaction.clear()
         return
     print(f"_ {user}: {reaction}")
 
     try:
         async with channel.typing():
-            for message in conversation.last_messages:
+            try:
+                messages = [
+                    await channel.fetch_message(message_id)
+                    for message_id in conversation.last_messages
+                ]
+            except (discord.NotFound, discord.Forbidden):
+                # don't do anything if any message in the list is not found
+                await reaction.clear()
+            for message in messages:
                 await message.delete()
             response = await conversation.regenerate()
             conversation.last_messages = await discord_send(
