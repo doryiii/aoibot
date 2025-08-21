@@ -10,6 +10,8 @@ DEFAULT_SYSTEM_PROMPT = (
 )
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
 
+conversations = {}
+
 
 class Conversation:
     def __init__(self, client, name, prompt):
@@ -19,11 +21,20 @@ class Conversation:
         self.client = client
 
     @classmethod
-    async def create(cls, base_url, prompt=None):
+    async def get(cls, key):
+        if key not in conversations:
+            conversations[key] = await Conversation.create(args.base_url)
+        return conversations[key]
+
+    @classmethod
+    async def create(cls, channel_id, base_url, prompt=None):
         client = AsyncOpenAI(base_url=base_url, api_key=API_KEY)
         if not prompt:
-            return cls(client, DEFAULT_NAME, DEFAULT_SYSTEM_PROMPT)
-        return cls(client, await cls.get_name(client, prompt), prompt)
+            convo = cls(client, DEFAULT_NAME, DEFAULT_SYSTEM_PROMPT)
+        else:
+            convo = cls(client, await cls.get_name(client, prompt), prompt)
+        conversations[channel_id] = convo
+        return convo
 
     @classmethod
     async def get_name(self, client, system_prompt):
