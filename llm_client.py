@@ -28,13 +28,13 @@ class Conversation:
         )
 
     async def save(self):
-        await self.db.save(
+        self.db.save(
             self.id, self.history, self.bot_name, self.last_messages
         )
 
     @classmethod
     async def get(cls, key, base_url, db):
-        convo_data = await db.get_conversation(key)
+        convo_data = db.get_conversation(key)
         if convo_data:
             history, bot_name, last_messages = convo_data
             client = AsyncOpenAI(base_url=base_url, api_key=API_KEY)
@@ -80,6 +80,7 @@ class Conversation:
     async def update_prompt(self, prompt):
         self.history[0] = {"role": "system", "content": prompt}
         self.bot_name = await self.get_name(self.client, prompt)
+        await self.save()
 
     async def generate(self, text, media=tuple()):
         # prepare text part

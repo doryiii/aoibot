@@ -28,7 +28,7 @@ class AoiBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     async def setup_hook(self):
-        self.db = await Database.get()
+        self.db = Database.get()
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
@@ -169,7 +169,7 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
     name="changeprompt",
     description="Change the current chat's system prompt."
 )
-async def newchat(interaction: discord.Interaction, prompt: str):
+async def changeprompt(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     channel_id = interaction.channel_id
     conversation = await Conversation.get(channel_id, args.base_url, bot.db)
