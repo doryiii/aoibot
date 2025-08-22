@@ -68,6 +68,11 @@ class Conversation:
             {"role": "assistant", "content": assistant},
         ])
 
+    def pop(self):
+        if len(self.history) >= 3:
+            self.history = self.history[:-2]
+            self.save()
+
     async def generate(self, text, media=tuple()):
         # prepare text part
         if text:

@@ -45,6 +45,8 @@ async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
         else:
             message = await channel.send(content=chunk)
         messages.append(message.id)
+    await message.add_reaction("🔁")
+    await message.add_reaction("❌")
     return messages
 
 async def webhook(channel):
@@ -88,6 +90,10 @@ async def on_message(message):
     try:
         async with channel.typing():
             response = await conversation.generate(user_message, media)
+        for old_message_id in conversation.last_messages:
+            old_message = await channel.fetch_message(old_message_id)
+            await old_message.clear_reaction("🔁")
+            await old_message.clear_reaction("❌")
         conversation.last_messages = await discord_send(
             channel, response, conversation.bot_name,
         )
@@ -98,7 +104,7 @@ async def on_message(message):
 
 @bot.event
 async def on_reaction_add(reaction, user):
-    if reaction.emoji != "🔁":
+    if reaction.emoji not in ("🔁", "❌") or user == bot.user:
         return
     message = reaction.message
     channel = message.channel
@@ -120,11 +126,15 @@ async def on_reaction_add(reaction, user):
                 await reaction.clear()
             for message in messages:
                 await message.delete()
-            response = await conversation.regenerate()
-            conversation.last_messages = await discord_send(
-                channel, response, conversation.bot_name,
-            )
-            conversation.save()
+
+            if reaction.emoji == "❌":
+                conversation.pop()
+            elif reaction.emoji == "🔁":
+                response = await conversation.regenerate()
+                conversation.last_messages = await discord_send(
+                    channel, response, conversation.bot_name,
+                )
+                conversation.save()
     except Exception as e:
         print(f"An error occurred: {e}")
         await message.reply("Sorry, I had a little hiccup. Baka!")
