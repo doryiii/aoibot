@@ -6,6 +6,7 @@ import argparse
 from typing import List, Dict, Any
 
 from llm_client import Conversation
+from database import Database
 
 # --- Configuration ---
 DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256"
@@ -23,10 +24,15 @@ parser.add_argument(
 args = parser.parse_args()
 
 # --- Bot Setup ---
+class AoiBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+    async def setup_hook(self):
+        self.db = await Database.get()
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
-bot = commands.Bot(command_prefix="/", intents=intents)
+bot = AoiBot(command_prefix="/", intents=intents)
 
 
 # --- Helpers ---
@@ -75,7 +81,7 @@ async def on_message(message):
 
     bot_tag = f'<@{bot.user.id}>'
     channel = message.channel
-    conversation = await Conversation.get(channel.id, args.base_url)
+    conversation = await Conversation.get(channel.id, args.base_url, bot.db)
     user_message = message.content
     if user_message.startswith(bot_tag):
         user_message = user_message[len(bot_tag):]
@@ -91,13 +97,16 @@ async def on_message(message):
         async with channel.typing():
             response = await conversation.generate(user_message, media)
         for old_message_id in conversation.last_messages:
-            old_message = await channel.fetch_message(old_message_id)
-            await old_message.clear_reaction("🔁")
-            await old_message.clear_reaction("❌")
+            try:
+                old_message = await channel.fetch_message(old_message_id)
+                await old_message.clear_reaction("🔁")
+                await old_message.clear_reaction("❌")
+            except (discord.NotFound, discord.Forbidden):
+                pass # Ignore if message is not found or we don't have perms
         conversation.last_messages = await discord_send(
             channel, response, conversation.bot_name,
         )
-        conversation.save()
+        await conversation.save()
     except Exception as e:
         print(f"An error occurred: {e}")
         await message.reply("Sorry, I had a little hiccup. Baka!")
@@ -108,7 +117,7 @@ async def on_reaction_add(reaction, user):
         return
     message = reaction.message
     channel = message.channel
-    conversation = await Conversation.get(channel.id, args.base_url)
+    conversation = await Conversation.get(channel.id, args.base_url, bot.db)
     if message.id not in conversation.last_messages:
         await reaction.clear()
         return
@@ -124,17 +133,18 @@ async def on_reaction_add(reaction, user):
             except (discord.NotFound, discord.Forbidden) as e:
                 # don't do anything if any message in the list is not found
                 await reaction.clear()
+                return
             for message in messages:
                 await message.delete()
 
             if reaction.emoji == "❌":
-                conversation.pop()
+                await conversation.pop()
             elif reaction.emoji == "🔁":
                 response = await conversation.regenerate()
                 conversation.last_messages = await discord_send(
                     channel, response, conversation.bot_name,
                 )
-                conversation.save()
+                await conversation.save()
     except Exception as e:
         print(f"An error occurred: {e}")
         await message.reply("Sorry, I had a little hiccup. Baka!")
@@ -148,7 +158,9 @@ async def on_reaction_add(reaction, user):
 async def newchat(interaction: discord.Interaction, prompt: str = None):
     await interaction.response.defer()
     channel_id = interaction.channel_id
-    conversation = await Conversation.create(channel_id, args.base_url, prompt)
+    conversation = await Conversation.create(
+        channel_id, args.base_url, bot.db, prompt
+    )
     await interaction.followup.send(
         f'Starting a new chat with {conversation.bot_name}: "{prompt}"'
     )
@@ -157,4 +169,3 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
 # --- Running the Bot ---
 if __name__ == "__main__":
     bot.run(args.discord_token)
-
