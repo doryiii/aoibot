@@ -6,11 +6,10 @@ class Database:
         self.db_path = db_path
         self.conn = None
 
-    @staticmethod
-    async def get(db_path='conversations.db'):
-        """
-        Asynchronously creates and returns a connected Database instance.
-        """
+    @classmethod
+    async def get(cls, db_path='conversations.db'):
+        """Asynchronously creates and returns a connected Database instance."""
+        print(f"Initializing DB connection to: {db_path}")
         db = Database(db_path)
         db.conn = await aiosqlite.connect(db.db_path)
         await db._create_table()

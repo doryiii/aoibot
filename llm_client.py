@@ -77,6 +77,10 @@ class Conversation:
             self.history = self.history[:-2]
             await self.save()
 
+    async def update_prompt(self, prompt):
+        self.history[0] = {"role": "system", "content": prompt}
+        self.bot_name = await self.get_name(self.client, prompt)
+
     async def generate(self, text, media=tuple()):
         # prepare text part
         if text:
@@ -119,3 +123,4 @@ class Conversation:
         response = llm_response.choices[0].message.content
         self.history[-1] = {"role": "assistant", "content": response}
         return response
+

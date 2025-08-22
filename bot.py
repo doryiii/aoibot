@@ -86,7 +86,7 @@ async def on_message(message):
     if user_message.startswith(bot_tag):
         user_message = user_message[len(bot_tag):]
     user_message = user_message.replace(bot_tag, conversation.bot_name).strip()
-    print(f'> {message.author.name}: {user_message}')
+    print(f'{channel.id}> {message.author.name}: {user_message}')
 
     media = []
     if message.attachments:
@@ -165,7 +165,21 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
         f'Starting a new chat with {conversation.bot_name}: "{prompt}"'
     )
 
+@bot.tree.command(
+    name="changeprompt",
+    description="Change the current chat's system prompt."
+)
+async def newchat(interaction: discord.Interaction, prompt: str):
+    await interaction.response.defer()
+    channel_id = interaction.channel_id
+    conversation = await Conversation.get(channel_id, args.base_url, bot.db)
+    await conversation.update_prompt(prompt)
+    await interaction.followup.send(
+        f'Now chatting with {conversation.bot_name}: "{prompt}"'
+    )
+
 
 # --- Running the Bot ---
 if __name__ == "__main__":
     bot.run(args.discord_token)
+
