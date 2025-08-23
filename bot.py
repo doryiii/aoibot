@@ -64,6 +64,15 @@ async def webhook(channel):
         return await channel.create_webhook(name=f'aoi-{channel.id}')
     return channel_hooks[0]
 
+async def clear_reactions(channel, message_ids):
+    for message_id in message_ids:
+        try:
+            message = await channel.fetch_message(message_id)
+            await message.clear_reaction("🔁")
+            await message.clear_reaction("❌")
+        except (discord.NotFound, discord.Forbidden):
+            pass # Ignore if message is not found or we don't have perms
+
 
 # --- Bot Events ---
 @bot.event
@@ -96,13 +105,7 @@ async def on_message(message):
     try:
         async with channel.typing():
             response = await conversation.generate(user_message, media)
-        for old_message_id in conversation.last_messages:
-            try:
-                old_message = await channel.fetch_message(old_message_id)
-                await old_message.clear_reaction("🔁")
-                await old_message.clear_reaction("❌")
-            except (discord.NotFound, discord.Forbidden):
-                pass # Ignore if message is not found or we don't have perms
+        await clear_reactions(channel, conversation.last_messages)
         conversation.last_messages = await discord_send(
             channel, response, conversation.bot_name,
         )
@@ -158,6 +161,11 @@ async def on_reaction_add(reaction, user):
 async def newchat(interaction: discord.Interaction, prompt: str = None):
     await interaction.response.defer()
     channel_id = interaction.channel_id
+    old_convo = await Conversation.get(
+        channel_id, args.base_url, bot.db, create_if_not_exist=False,
+    )
+    if old_convo:
+        await clear_reactions(interaction.channel, old_convo.last_messages)
     conversation = await Conversation.create(
         channel_id, args.base_url, bot.db, prompt
     )

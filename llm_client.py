@@ -33,7 +33,7 @@ class Conversation:
         )
 
     @classmethod
-    async def get(cls, key, base_url, db):
+    async def get(cls, key, base_url, db, create_if_not_exist=True):
         convo_data = db.get_conversation(key)
         if convo_data:
             history, bot_name, last_messages = convo_data
@@ -42,7 +42,9 @@ class Conversation:
             convo.history = history
             convo.last_messages = last_messages
             return convo
-        return await Conversation.create(key, base_url, db)
+        if create_if_not_exists:
+            return await Conversation.create(key, base_url, db)
+        return None
 
     @classmethod
     async def create(cls, key, base_url, db, prompt=None):
