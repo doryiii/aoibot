@@ -162,7 +162,8 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
         channel_id, args.base_url, bot.db, prompt
     )
     await interaction.followup.send(
-        f'Starting a new chat with {conversation.bot_name}: "{prompt}"'
+        f'Starting a new chat with {conversation.bot_name}: '
+        f'"{conversation.history[0]["content"]}"'
     )
 
 @bot.tree.command(
