@@ -10,43 +10,36 @@ from conversations import Conversation, ConversationManager
 from database import Database
 
 # --- Configuration ---
-DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256"
-DEFAULT_SYSTEM_PROMPT = "you are a catboy named Aoi with dark blue fur and is a tsundere"
-DEFAULT_DB = "conversations.db"
+DEFAULT_AVATAR = 'https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256'
 
 # --- Command Line Arguments ---
-parser = argparse.ArgumentParser(description="Aoi Discord Bot")
+parser = argparse.ArgumentParser(description='Aoi Discord Bot')
 parser.add_argument(
-    '--base_url', type=str, default='http://localhost:8080/v1',
+    '--base_url', default='http://localhost:8080/v1',
     help='The base URL for the OpenAI API server.',
 )
 parser.add_argument(
-    '--api_key', type=str, default='',
-    help='The API key for OpenAI API.',
+    '--api_key', default='', help='The API key for OpenAI API.',
 )
 parser.add_argument(
-    '--model', type=str, default='',
-    help='The model to use from OpenAI API.',
+    '--model', default='', help='The model to use from OpenAI API.',
 )
 parser.add_argument(
-    '--default_prompt', type=str, default=DEFAULT_SYSTEM_PROMPT,
+    '--default_prompt',
+    default='you are a catboy named Aoi with dark blue fur and is a tsundere',
     help='Default system prompt when not given in chat.',
 )
 parser.add_argument(
-    '--db', type=str, default=DEFAULT_DB,
-    help='SQLite DB to use.',
+    '--db', default='conversations.db', help='SQLite DB to use.',
 )
 parser.add_argument(
-    '--discord_token', type=str, required=True,
-    help='The Discord bot token.',
+    '--discord_token', required=True, help='The Discord bot token.',
 )
 args = parser.parse_args()
 
 # --- Bot Setup ---
 
 class AoiBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
     async def setup_hook(self):
         db = Database.get(args.db)
         openai = AsyncOpenAI(base_url=args.base_url, api_key=args.api_key)
@@ -56,7 +49,7 @@ class AoiBot(commands.Bot):
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
-bot = AoiBot(command_prefix="/", intents=intents)
+bot = AoiBot(command_prefix='/', intents=intents)
 
 
 # --- Helpers ---
@@ -75,8 +68,8 @@ async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
         else:
             message = await channel.send(content=chunk)
         messages.append(message.id)
-    await message.add_reaction("🔁")
-    await message.add_reaction("❌")
+    await message.add_reaction('🔁')
+    await message.add_reaction('❌')
     return messages
 
 async def webhook(channel):
@@ -92,8 +85,8 @@ async def clear_reactions(channel, message_ids):
     for message_id in message_ids:
         try:
             message = await channel.fetch_message(message_id)
-            await message.clear_reaction("🔁")
-            await message.clear_reaction("❌")
+            await message.clear_reaction('🔁')
+            await message.clear_reaction('❌')
         except (discord.NotFound, discord.Forbidden):
             pass # Ignore if message is not found or we don't have perms
 
@@ -135,12 +128,12 @@ async def on_message(message):
         )
         await conversation.save()
     except Exception as e:
-        print(f"An error occurred: {e}")
-        await message.reply("Sorry, I had a little hiccup. Baka!")
+        print(f'An error occurred: {e}')
+        await message.reply('Sorry, I had a little hiccup. Baka!')
 
 @bot.event
 async def on_reaction_add(reaction, user):
-    if reaction.emoji not in ("🔁", "❌") or user == bot.user:
+    if reaction.emoji not in ('🔁', '❌') or user == bot.user:
         return
     message = reaction.message
     channel = message.channel
@@ -148,7 +141,7 @@ async def on_reaction_add(reaction, user):
     if message.id not in conversation.last_messages:
         await reaction.clear()
         return
-    print(f"_ {user}: {reaction}")
+    print(f'_ {user}: {reaction}')
 
     try:
         try:
@@ -163,9 +156,9 @@ async def on_reaction_add(reaction, user):
         for message in messages:
             await message.delete()
 
-        if reaction.emoji == "❌":
+        if reaction.emoji == '❌':
             await conversation.pop()
-        elif reaction.emoji == "🔁":
+        elif reaction.emoji == '🔁':
             async with channel.typing():
                 response = await conversation.regenerate()
                 conversation.last_messages = await discord_send(
@@ -173,14 +166,14 @@ async def on_reaction_add(reaction, user):
                 )
                 await conversation.save()
     except Exception as e:
-        print(f"An error occurred: {e}")
-        await message.reply("Sorry, I had a little hiccup. Baka!")
+        print(f'An error occurred: {e}')
+        await message.reply('Sorry, I had a little hiccup. Baka!')
 
 
 # --- Slash Commands ---
 @bot.tree.command(
-    name="newchat",
-    description="Start a new chat with an optional system prompt."
+    name='newchat',
+    description='Start a new chat with an optional system prompt.'
 )
 async def newchat(interaction: discord.Interaction, prompt: str = None):
     await interaction.response.defer()
@@ -195,8 +188,8 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
     )
 
 @bot.tree.command(
-    name="changeprompt",
-    description="Change the current chat's system prompt."
+    name='changeprompt',
+    description='Change the system prompt of the current conversation.'
 )
 async def changeprompt(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
@@ -209,5 +202,5 @@ async def changeprompt(interaction: discord.Interaction, prompt: str):
 
 
 # --- Running the Bot ---
-if __name__ == "__main__":
+if __name__ == '__main__':
     bot.run(args.discord_token)
