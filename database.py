@@ -7,7 +7,7 @@ class Database:
         self._create_table()
 
     @classmethod
-    def get(cls, db_path='conversations.db'):
+    def get(cls, db_path):
         """Creates and returns a connected Database instance."""
         print(f"Initializing DB connection to: {db_path}")
         return Database(sqlite3.connect(db_path))
@@ -26,7 +26,10 @@ class Database:
     def get_conversation(self, conversation_id):
         with self.conn:
             cursor = self.conn.cursor()
-            cursor.execute("SELECT history, bot_name, last_messages FROM conversations WHERE id = ?", (conversation_id,))
+            cursor.execute(
+                "SELECT history, bot_name, last_messages FROM conversations WHERE id = ?",
+                (conversation_id,)
+            )
             row = cursor.fetchone()
             if row:
                 history = json.loads(row[0])
@@ -38,11 +41,16 @@ class Database:
     def save(self, conversation_id, history, bot_name, last_messages):
         with self.conn:
             self.conn.execute(
-                "INSERT OR REPLACE INTO conversations (id, history, bot_name, last_messages) VALUES (?, ?, ?, ?)",
-                (conversation_id, json.dumps(history), bot_name, json.dumps(last_messages))
+                "INSERT OR REPLACE INTO conversations "
+                "(id, history, bot_name, last_messages) VALUES (?, ?, ?, ?)",
+                (
+                    conversation_id, json.dumps(history),
+                    bot_name, json.dumps(last_messages)
+                ),
             )
 
     def delete(self, conversation_id):
         with self.conn:
-            self.conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
-
+            self.conn.execute(
+                "DELETE FROM conversations WHERE id = ?", (conversation_id,),
+            )

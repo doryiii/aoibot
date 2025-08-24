@@ -1,21 +1,40 @@
 import collections
 import discord
 from discord.ext import commands
+from openai import AsyncOpenAI
 import os
 import argparse
 from typing import List, Dict, Any
 
-from llm_client import Conversation
+from conversations import Conversation, ConversationManager
 from database import Database
 
 # --- Configuration ---
 DEFAULT_AVATAR = "https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256"
+DEFAULT_SYSTEM_PROMPT = "you are a catboy named Aoi with dark blue fur and is a tsundere"
+DEFAULT_DB = "conversations.db"
 
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description="Aoi Discord Bot")
 parser.add_argument(
-    '--base_url', type=str, required=True,
-    help='The base URL for the OpenAI API.',
+    '--base_url', type=str, default='http://localhost:8080/v1',
+    help='The base URL for the OpenAI API server.',
+)
+parser.add_argument(
+    '--api_key', type=str, default='',
+    help='The API key for OpenAI API.',
+)
+parser.add_argument(
+    '--model', type=str, default='',
+    help='The model to use from OpenAI API.',
+)
+parser.add_argument(
+    '--default_prompt', type=str, default=DEFAULT_SYSTEM_PROMPT,
+    help='Default system prompt when not given in chat.',
+)
+parser.add_argument(
+    '--db', type=str, default=DEFAULT_DB,
+    help='SQLite DB to use.',
 )
 parser.add_argument(
     '--discord_token', type=str, required=True,
@@ -24,11 +43,16 @@ parser.add_argument(
 args = parser.parse_args()
 
 # --- Bot Setup ---
+
 class AoiBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     async def setup_hook(self):
-        self.db = Database.get()
+        db = Database.get(args.db)
+        openai = AsyncOpenAI(base_url=args.base_url, api_key=args.api_key)
+        self.manager = ConversationManager(
+            openai, args.model, db, args.default_prompt,
+        )
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
@@ -90,7 +114,7 @@ async def on_message(message):
 
     bot_tag = f'<@{bot.user.id}>'
     channel = message.channel
-    conversation = await Conversation.get(channel.id, args.base_url, bot.db)
+    conversation = await bot.manager.get(channel.id)
     user_message = message.content
     if user_message.startswith(bot_tag):
         user_message = user_message[len(bot_tag):]
@@ -120,29 +144,29 @@ async def on_reaction_add(reaction, user):
         return
     message = reaction.message
     channel = message.channel
-    conversation = await Conversation.get(channel.id, args.base_url, bot.db)
+    conversation = await bot.manager.get(channel.id)
     if message.id not in conversation.last_messages:
         await reaction.clear()
         return
     print(f"_ {user}: {reaction}")
 
     try:
-        async with channel.typing():
-            try:
-                messages = [
-                    await channel.fetch_message(message_id)
-                    for message_id in conversation.last_messages
-                ]
-            except (discord.NotFound, discord.Forbidden) as e:
-                # don't do anything if any message in the list is not found
-                await reaction.clear()
-                return
-            for message in messages:
-                await message.delete()
+        try:
+            messages = [
+                await channel.fetch_message(message_id)
+                for message_id in conversation.last_messages
+            ]
+        except (discord.NotFound, discord.Forbidden):
+            # don't do anything if any message in the list is not found
+            await reaction.clear()
+            return
+        for message in messages:
+            await message.delete()
 
-            if reaction.emoji == "❌":
-                await conversation.pop()
-            elif reaction.emoji == "🔁":
+        if reaction.emoji == "❌":
+            await conversation.pop()
+        elif reaction.emoji == "🔁":
+            async with channel.typing():
                 response = await conversation.regenerate()
                 conversation.last_messages = await discord_send(
                     channel, response, conversation.bot_name,
@@ -161,14 +185,10 @@ async def on_reaction_add(reaction, user):
 async def newchat(interaction: discord.Interaction, prompt: str = None):
     await interaction.response.defer()
     channel_id = interaction.channel_id
-    old_convo = await Conversation.get(
-        channel_id, args.base_url, bot.db, create_if_not_exist=False,
-    )
+    old_convo = await bot.manager.get(channel_id, create_if_missing=False)
     if old_convo:
         await clear_reactions(interaction.channel, old_convo.last_messages)
-    conversation = await Conversation.create(
-        channel_id, args.base_url, bot.db, prompt
-    )
+    conversation = await bot.manager.new_conversation(channel_id, prompt)
     await interaction.followup.send(
         f'Starting a new chat with {conversation.bot_name}: '
         f'"{conversation.history[0]["content"]}"'
@@ -181,7 +201,7 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
 async def changeprompt(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     channel_id = interaction.channel_id
-    conversation = await Conversation.get(channel_id, args.base_url, bot.db)
+    conversation = await bot.manager.get(channel_id)
     await conversation.update_prompt(prompt)
     await interaction.followup.send(
         f'Now chatting with {conversation.bot_name}: "{prompt}"'
@@ -191,4 +211,3 @@ async def changeprompt(interaction: discord.Interaction, prompt: str):
 # --- Running the Bot ---
 if __name__ == "__main__":
     bot.run(args.discord_token)
-

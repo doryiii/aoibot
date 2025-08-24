@@ -1,90 +1,97 @@
 import aiohttp
 import base64
-from openai import AsyncOpenAI
 from database import Database
 
 API_KEY = "eh"
 MODEL = "p620"
 DEFAULT_NAME = "Aoi"
-DEFAULT_SYSTEM_PROMPT = (
-    "you are a catboy named Aoi with dark blue fur and is a tsundere"
-)
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
 
 
-class Conversation:
-    def __init__(self, client, name, prompt, convo_id, db):
-        self.history = [{"role": "system", "content": prompt}]
-        self.bot_name = name
-        self.last_messages = []
-        self.client = client
-        self.id = convo_id
+async def get_name(client, model, prompt):
+    """Generates an assistant name for the given prompt."""
+    name_response = await client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": NAME_PROMPT}
+        ],
+    )
+    return name_response.choices[0].message.content.split('\n')[0]
+
+
+class ConversationManager:
+    """Creates and retrieves Conversations."""
+    def __init__(self, openai_client, model, db, default_prompt):
+        self.model = model
+        self.client = openai_client
         self.db = db
+        self.default_prompt = default_prompt
 
-    def __str__(self):
-        return (
-            f"Conversation({self.bot_name}, {self.last_messages}, "
-            f"{self.history}"
-        )
-
-    async def save(self):
-        self.db.save(
-            self.id, self.history, self.bot_name, self.last_messages
-        )
-
-    @classmethod
-    async def get(cls, key, base_url, db, create_if_not_exist=True):
-        convo_data = db.get_conversation(key)
+    async def get(self, key, create_if_missing=True):
+        """Gets a conversation based on |key|, optionally create when not found."""
+        convo_data = self.db.get_conversation(key)
         if convo_data:
             history, bot_name, last_messages = convo_data
-            client = AsyncOpenAI(base_url=base_url, api_key=API_KEY)
-            convo = cls(client, bot_name, history[0]['content'], key, db)
-            convo.history = history
-            convo.last_messages = last_messages
-            return convo
-        if create_if_not_exists:
-            return await Conversation.create(key, base_url, db)
+            return Conversation(
+                key, bot_name, history, last_messages,
+                self.client, self.model, self.db,
+            )
+        if create_if_missing:
+            return await self.new_conversation(key, self.default_prompt)
         return None
 
-    @classmethod
-    async def create(cls, key, base_url, db, prompt=None):
-        client = AsyncOpenAI(base_url=base_url, api_key=API_KEY)
-        if not prompt:
-            convo = cls(client, DEFAULT_NAME, DEFAULT_SYSTEM_PROMPT, key, db)
-        else:
-            name = await cls.get_name(client, prompt)
-            convo = cls(client, name, prompt, key, db)
+    async def new_conversation(self, key, prompt = None):
+        """Creates a new Conversation with key based on given prompt."""
+        prompt = prompt or self.default_prompt
+        name = await get_name(self.client, self.model, prompt)
+        history = [{"role": "system", "content": prompt}]
+        last_messages = []
+        convo = Conversation(
+            key, name, history, last_messages, self.client, self.model, self.db,
+        )
         await convo.save()
         return convo
 
-    @classmethod
-    async def get_name(self, client, system_prompt):
-        name_response = await client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": NAME_PROMPT}
-            ],
-        )
-        return name_response.choices[0].message.content.split('\n')[0]
+
+class Conversation:
+    """Holds data about a conversation thread."""
+    def __init__(
+        self, convo_id, name, history, last_messages, api_client, model, db,
+    ):
+        self.id = convo_id
+        self.bot_name = name
+        self.history = history
+        self.last_messages = last_messages
+        self.client = api_client
+        self.model = model
+        self.db = db
+
+    async def save(self):
+        """Saves the conversation to the DB."""
+        self.db.save(self.id, self.history, self.bot_name, self.last_messages)
 
     def add_message_pair(self, user, assistant):
+        """Adds a user/assistant convesation turn pair."""
         self.history.extend([
             {"role": "user", "content": user},
             {"role": "assistant", "content": assistant},
         ])
 
     async def pop(self):
+        """Removes one user/assistant converation turn pair."""
         if len(self.history) >= 3:
             self.history = self.history[:-2]
             await self.save()
 
     async def update_prompt(self, prompt):
+        """Changes current prompt to a new one, keeping the rest of history."""
         self.history[0] = {"role": "system", "content": prompt}
-        self.bot_name = await self.get_name(self.client, prompt)
+        self.bot_name = await get_name(self.client, self.model, prompt)
         await self.save()
 
     async def generate(self, text, media=tuple()):
+        """Generates next assistant conversation turn."""
         # prepare text part
         if text:
             openai_content = [{"type": "text", "text": text}]
@@ -98,8 +105,7 @@ class Conversation:
                     continue
                 try:
                     async with session.get(url) as resp:
-                        if resp.status != 200:
-                            raise IOError(f"{url} --> {resp.status}")
+                        resp.raise_for_status()
                         image_data = await resp.read()
                         b64_image = base64.b64encode(image_data).decode('utf-8')
                         b64_url = f"data:{content_type};base64,{b64_image}"
@@ -120,10 +126,10 @@ class Conversation:
         return response
 
     async def regenerate(self):
+        """Regenerates the last assistant turn."""
         llm_response = await self.client.chat.completions.create(
             model=MODEL, messages=self.history[:-1]
         )
         response = llm_response.choices[0].message.content
         self.history[-1] = {"role": "assistant", "content": response}
         return response
-
