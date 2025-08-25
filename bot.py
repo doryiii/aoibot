@@ -141,7 +141,7 @@ async def on_reaction_add(reaction, user):
     if message.id not in conversation.last_messages:
         await reaction.clear()
         return
-    print(f'_ {user}: {reaction}')
+    print(f'{channel.id}_ {user}: {reaction}')
 
     try:
         try:
@@ -175,13 +175,19 @@ async def on_reaction_add(reaction, user):
     name='newchat',
     description='Start a new chat with an optional system prompt.'
 )
-async def newchat(interaction: discord.Interaction, prompt: str = None):
+async def newchat(
+    interaction: discord.Interaction,
+    prompt: str = None,
+    web_fetch: bool = True,
+):
     await interaction.response.defer()
     channel_id = interaction.channel_id
     old_convo = await bot.manager.get(channel_id, create_if_missing=False)
     if old_convo:
         await clear_reactions(interaction.channel, old_convo.last_messages)
-    conversation = await bot.manager.new_conversation(channel_id, prompt)
+    conversation = await bot.manager.new_conversation(
+        channel_id, prompt, web_fetch
+    )
     await interaction.followup.send(
         f'Starting a new chat with {conversation.bot_name}: '
         f'"{conversation.history[0]["content"]}"'
@@ -191,13 +197,18 @@ async def newchat(interaction: discord.Interaction, prompt: str = None):
     name='changeprompt',
     description='Change the system prompt of the current conversation.'
 )
-async def changeprompt(interaction: discord.Interaction, prompt: str):
+async def changeprompt(
+    interaction: discord.Interaction,
+    prompt: str,
+    web_fetch: bool = True,
+):
     await interaction.response.defer()
     channel_id = interaction.channel_id
     conversation = await bot.manager.get(channel_id)
-    await conversation.update_prompt(prompt)
+    await conversation.update_prompt(prompt, web_fetch)
     await interaction.followup.send(
-        f'Now chatting with {conversation.bot_name}: "{prompt}"'
+        f'Now chatting with {conversation.bot_name}: '
+        f'"{conversation.history[0]["content"]}"'
     )
 
 
