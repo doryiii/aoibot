@@ -9,9 +9,6 @@ from typing import List, Dict, Any
 from conversations import Conversation, ConversationManager
 from database import Database
 
-# --- Configuration ---
-DEFAULT_AVATAR = 'https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256'
-
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description='Aoi Discord Bot')
 parser.add_argument(
@@ -28,6 +25,11 @@ parser.add_argument(
     '--default_prompt',
     default='you are a catboy named Aoi with dark blue fur and is a tsundere',
     help='Default system prompt when not given in chat.',
+)
+parser.add_argument(
+    '--default_avatar',
+    default='https://cdn.discordapp.com/avatars/1406466525858369716/f1dfeaf2a1c361dbf981e2e899c7f981?size=256',
+    help='Default avatar to use.',
 )
 parser.add_argument(
     '--db', default='conversations.db', help='SQLite DB to use.',
@@ -53,7 +55,7 @@ bot = AoiBot(command_prefix='/', intents=intents)
 
 
 # --- Helpers ---
-async def discord_send(channel, text, name, avatar=DEFAULT_AVATAR):
+async def discord_send(channel, text, name, avatar=args.default_avatar):
     chunks = [text[i:i+2000] for i in range(0, len(text), 2000)]
     messages = []
     for chunk in chunks:
