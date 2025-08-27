@@ -41,9 +41,9 @@ class ConversationManager:
         """Gets a conversation based on |key|, optionally create when not found."""
         convo_data = self.db.get_conversation(key)
         if convo_data:
-            history, bot_name, last_messages = convo_data
+            prompt, extra_prompt, history, bot_name, last_messages = convo_data
             return Conversation(
-                key, bot_name, history, last_messages,
+                key, bot_name, prompt, extra_prompt,  history, last_messages,
                 self.client, self.model, self.db,
             )
         if create_if_missing:
@@ -53,15 +53,14 @@ class ConversationManager:
     async def new_conversation(self, key, prompt = None, web_fetch = True):
         """Creates a new Conversation with key based on given prompt."""
         prompt = prompt or self.default_prompt
-        if web_fetch:
-            full_prompt = prompt + "\n\n" + WEB_FETCH_PROMPT_PART
-        else:
-            full_prompt = prompt
+        extra_prompt = WEB_FETCH_PROMPT_PART if web_fetch else ""
+        print(f"...{prompt}...{web_fetch}")
         name = await get_name(self.client, self.model, prompt)
-        history = [{"role": "system", "content": full_prompt}]
+        history = []
         last_messages = []
         convo = Conversation(
-            key, name, history, last_messages, self.client, self.model, self.db,
+            key, name, prompt, extra_prompt, history, last_messages,
+            self.client, self.model, self.db,
         )
         await convo.save()
         return convo
@@ -71,12 +70,14 @@ class Conversation:
     """Holds data about a conversation thread."""
     def __init__(
         self,
-        convo_id, name,
+        convo_id, name, prompt, extra_prompt,
         history, last_messages,
         api_client, model, db,
     ):
         self.id = convo_id
         self.bot_name = name
+        self.prompt = prompt
+        self.extra_prompt = extra_prompt
         self.history = history
         self.last_messages = last_messages
         self.client = api_client
@@ -85,7 +86,10 @@ class Conversation:
 
     async def save(self):
         """Saves the conversation to the DB."""
-        self.db.save(self.id, self.history, self.bot_name, self.last_messages)
+        self.db.save(
+            self.id, self.prompt, self.extra_prompt,
+            self.history, self.bot_name, self.last_messages
+        )
 
     def add_message_pair(self, user, assistant):
         """Adds a user/assistant convesation turn pair."""
@@ -102,11 +106,8 @@ class Conversation:
 
     async def update_prompt(self, prompt, web_fetch):
         """Changes current prompt to a new one, keeping the rest of history."""
-        if web_fetch:
-            full_prompt = prompt + "\n\n" + WEB_FETCH_PROMPT_PART
-        else:
-            full_prompt = prompt
-        self.history[0] = {"role": "system", "content": full_prompt}
+        self.prompt = prompt
+        self.extra_prompt = WEB_FETCH_PROMPT_PART if web_fetch else ""
         self.bot_name = await get_name(self.client, self.model, prompt)
         await self.save()
 
@@ -139,7 +140,12 @@ class Conversation:
         # send request to openai api and return response
         to_send = openai_content
         while to_send:
-            request = self.history + [{"role": "user", "content": to_send}]
+            request = (
+                [{"role": "system", "content": f"{self.prompt}\n\n{self.extra_prompt}"}]
+                + self.history
+                + [{"role": "user", "content": to_send}]
+            )
+            print(f"DEBUG: {request}")
             llm_response = await self.client.chat.completions.create(
                 model=MODEL, messages=request,
             )
@@ -163,3 +169,4 @@ class Conversation:
         response = llm_response.choices[0].message.content
         self.history[-1] = {"role": "assistant", "content": response}
         return response
+

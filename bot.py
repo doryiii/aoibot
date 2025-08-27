@@ -180,7 +180,7 @@ async def on_reaction_add(reaction, user):
 async def newchat(
     interaction: discord.Interaction,
     prompt: str = None,
-    web_fetch: bool = True,
+    web_fetch: bool = False,
 ):
     await interaction.response.defer()
     channel_id = interaction.channel_id
@@ -192,7 +192,7 @@ async def newchat(
     )
     await interaction.followup.send(
         f'Starting a new chat with {conversation.bot_name}: '
-        f'"{conversation.history[0]["content"]}"'
+        f'"{conversation.prompt}"'
     )
 
 @bot.tree.command(
@@ -202,7 +202,7 @@ async def newchat(
 async def changeprompt(
     interaction: discord.Interaction,
     prompt: str,
-    web_fetch: bool = True,
+    web_fetch: bool = False,
 ):
     await interaction.response.defer()
     channel_id = interaction.channel_id
@@ -210,7 +210,7 @@ async def changeprompt(
     await conversation.update_prompt(prompt, web_fetch)
     await interaction.followup.send(
         f'Now chatting with {conversation.bot_name}: '
-        f'"{conversation.history[0]["content"]}"'
+        f'"{conversation.prompt}"'
     )
 
 

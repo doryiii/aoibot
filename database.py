@@ -17,6 +17,8 @@ class Database:
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
+                    prompt TEXT NOT NULL,
+                    extra_prompt TEXT NOT NULL,
                     history TEXT NOT NULL,
                     bot_name TEXT NOT NULL,
                     last_messages TEXT NOT NULL
@@ -27,24 +29,31 @@ class Database:
         with self.conn:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT history, bot_name, last_messages FROM conversations WHERE id = ?",
+                "SELECT prompt, extra_prompt, history, bot_name, last_messages "
+                "FROM conversations WHERE id = ?",
                 (conversation_id,)
             )
             row = cursor.fetchone()
             if row:
-                history = json.loads(row[0])
-                bot_name = row[1]
-                last_messages = json.loads(row[2])
-                return history, bot_name, last_messages
+                prompt = row[0]
+                extra_prompt = row[1]
+                history = json.loads(row[2])
+                bot_name = row[3]
+                last_messages = json.loads(row[4])
+                return prompt, extra_prompt, history, bot_name, last_messages
             return None
 
-    def save(self, conversation_id, history, bot_name, last_messages):
+    def save(
+        self, conversation_id, prompt, extra_prompt,
+        history, bot_name, last_messages
+    ):
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO conversations "
-                "(id, history, bot_name, last_messages) VALUES (?, ?, ?, ?)",
+                "(id, prompt, extra_prompt, history, bot_name, last_messages) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
-                    conversation_id, json.dumps(history),
+                    conversation_id, prompt, extra_prompt, json.dumps(history),
                     bot_name, json.dumps(last_messages)
                 ),
             )
