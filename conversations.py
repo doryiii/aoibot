@@ -145,9 +145,9 @@ class Conversation:
                 + self.history
                 + [{"role": "user", "content": to_send}]
             )
-            print(f"DEBUG: {request}")
             llm_response = await self.client.chat.completions.create(
-                model=MODEL, messages=request,
+                model=MODEL, messages=request, stream=False,
+                extra_body={"cache_prompt": True},
             )
             resp = llm_response.choices[0].message.content.strip()
             self.add_message_pair(openai_content, resp)
