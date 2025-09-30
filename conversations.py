@@ -1,21 +1,15 @@
 import aiohttp
 import base64
-import re
-from database import Database
-from url_to_llm_text.get_llm_ready_text import url_to_llm_text
+import html2text
+import inspect
+import json
+import os
+import requests
 
 API_KEY = "eh"
 MODEL = "p620"
 DEFAULT_NAME = "Aoi"
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
-WEB_FETCH_PROMPT_PART = (
-    "You have access to the internet. If you decide to look at website(s), "
-    "you MUST put it in the format [web_fetch(url=\"https://web.site.link.1\"),"
-    " web_fetch(url=\"https://web.site.link.2\")] \n\n"
-    "You SHOULD NOT include any other text in the response if you want to "
-    "look at websites."
-)
-WEB_FETCH_RE = re.compile(r'(web_fetch\(url="(?P<url>[^"]+)"\))+')
 
 async def get_name(client, model, prompt):
     """Generates an assistant name for the given prompt."""
@@ -27,6 +21,77 @@ async def get_name(client, model, prompt):
         ],
     )
     return name_response.choices[0].message.content.split('\n')[0]
+
+
+class Tools:
+    @classmethod
+    def tools(cls):
+        tools = []
+        for name in dir(cls):
+            if name.startswith("_") or name == "tools" or name == "call":
+                continue
+            f = getattr(cls, name)
+            if not callable(f):
+                continue
+            desc, docparams = inspect.getdoc(f).split("\n", 1)
+            docparams = json.loads(docparams)
+            sigparams = inspect.signature(f).parameters
+            requiredparams = [
+                p for p in docparams
+                if sigparams[p].default is inspect.Parameter.empty
+            ]
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": desc,
+                    "parameters": {
+                        "type": "object",
+                        "properties": docparams,
+                        "required": requiredparams,
+                    },
+                },
+            })
+        return tools
+
+    @classmethod
+    def call(cls, method, **kwargs):
+        if method not in [f["function"]["name"] for f in cls.tools()]:
+            raise ValueError(f"unknown method: {method}")
+        return getattr(cls, method)(**kwargs)
+
+    @classmethod
+    def web_fetch(cls, url):
+        """Get content of a webpage.
+
+        {"url": {"type": "string", "description": "the webpage URL to fetch"}}
+        """
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
+        webres = requests.get(url)
+        webres.raise_for_status()
+        return html2text.html2text(webres.text)
+
+    @classmethod
+    def web_search(cls, query, num_results=5):
+        """Search the web.
+
+        {
+            "query": {"type": "string", "description": "the web search query"},
+            "num_results": {
+                "type": "integer",
+                "description": "how many pages to return. Default is 5"}
+        }
+        """
+        res = requests.post(
+            "https://api.langsearch.com/v1/web-search",
+            json={"query": query, "summary": True, "count": num_results},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {os.environ.get("LANGSEARCH_API_KEY")}",
+            },
+        ).json()
+        return json.dumps(res)
 
 
 class ConversationManager:
@@ -42,24 +107,23 @@ class ConversationManager:
         convo_data = self.db.get_conversation(key)
         if convo_data:
             prompt, extra_prompt, history, bot_name, last_messages = convo_data
+            del extra_prompt
             return Conversation(
-                key, bot_name, prompt, extra_prompt,  history, last_messages,
+                key, bot_name, prompt, history, last_messages,
                 self.client, self.model, self.db,
             )
         if create_if_missing:
             return await self.new_conversation(key, self.default_prompt)
         return None
 
-    async def new_conversation(self, key, prompt = None, web_fetch = True):
+    async def new_conversation(self, key, prompt = None):
         """Creates a new Conversation with key based on given prompt."""
         prompt = prompt or self.default_prompt
-        extra_prompt = WEB_FETCH_PROMPT_PART if web_fetch else ""
-        print(f"...{prompt}...{web_fetch}")
         name = await get_name(self.client, self.model, prompt)
         history = []
         last_messages = []
         convo = Conversation(
-            key, name, prompt, extra_prompt, history, last_messages,
+            key, name, prompt, history, last_messages,
             self.client, self.model, self.db,
         )
         await convo.save()
@@ -70,14 +134,13 @@ class Conversation:
     """Holds data about a conversation thread."""
     def __init__(
         self,
-        convo_id, name, prompt, extra_prompt,
+        convo_id, name, prompt,
         history, last_messages,
         api_client, model, db,
     ):
         self.id = convo_id
         self.bot_name = name
         self.prompt = prompt
-        self.extra_prompt = extra_prompt
         self.history = history
         self.last_messages = last_messages
         self.client = api_client
@@ -87,16 +150,9 @@ class Conversation:
     async def save(self):
         """Saves the conversation to the DB."""
         self.db.save(
-            self.id, self.prompt, self.extra_prompt,
+            self.id, self.prompt, "",  # TODO remove extra_prompt from DB
             self.history, self.bot_name, self.last_messages
         )
-
-    def add_message_pair(self, user, assistant):
-        """Adds a user/assistant convesation turn pair."""
-        self.history.extend([
-            {"role": "user", "content": user},
-            {"role": "assistant", "content": assistant},
-        ])
 
     async def pop(self):
         """Removes one user/assistant converation turn pair."""
@@ -104,10 +160,9 @@ class Conversation:
             self.history = self.history[:-2]
             await self.save()
 
-    async def update_prompt(self, prompt, web_fetch):
+    async def update_prompt(self, prompt):
         """Changes current prompt to a new one, keeping the rest of history."""
         self.prompt = prompt
-        self.extra_prompt = WEB_FETCH_PROMPT_PART if web_fetch else ""
         self.bot_name = await get_name(self.client, self.model, prompt)
         await self.save()
 
@@ -138,29 +193,40 @@ class Conversation:
                     print(f"Error downloading or processing attachment: {e}")
 
         # send request to openai api and return response
-        to_send = openai_content
-        while to_send:
+        to_sends = [[{"role": "user", "content": openai_content}]]
+        while to_sends:
+            to_send = to_sends.pop(0)
             request = (
-                [{"role": "system", "content": f"{self.prompt}\n\n{self.extra_prompt}"}]
-                + self.history
-                + [{"role": "user", "content": to_send}]
+                [{"role": "system", "content": self.prompt}]
+                + self.history + to_send
             )
             llm_response = await self.client.chat.completions.create(
-                model=MODEL, messages=request, stream=False,
-                extra_body={"cache_prompt": True},
+                model=MODEL, messages=request, tools=Tools.tools(),
+                stream=False, extra_body={"cache_prompt": True},
             )
-            resp = llm_response.choices[0].message.content.strip()
-            self.add_message_pair(openai_content, resp)
-            # check for web requests
-            urls = [m.group("url") for m in WEB_FETCH_RE.finditer(resp)]
-            if not resp.startswith("[") or not resp.endswith("]") or not urls:
-                break
-            print(f"{self.id}? {urls}")
-            fetches = [f"{u}:\n\n{(await url_to_llm_text(u))}" for u in urls]
-            to_send = [{"type": "text", "text": "\n\n".join(fetches)}]
+            llm_response = llm_response.choices[0].message
+            self.history.extend(to_send)
+            self.history.append({k:v for k, v in llm_response.model_dump().items() if v})
 
-        return resp
+            # check for tool calls
+            if llm_response.tool_calls:
+                tool_results = []
+                for tool_call in llm_response.tool_calls:
+                    print(f"calling {tool_call.function}... ")
+                    tool_result_text = Tools.call(
+                        tool_call.function.name,
+                        **json.loads(tool_call.function.arguments)
+                    )
+                    tool_results.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": tool_result_text,
+                    })
+                to_sends.append(tool_results)
+        return llm_response.content
 
+
+    # TODO: find the first "user" message from the back of history, then delete everything after that and retry
     async def regenerate(self):
         """Regenerates the last assistant turn."""
         llm_response = await self.client.chat.completions.create(

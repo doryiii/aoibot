@@ -1,12 +1,11 @@
-import collections
+import argparse
+import os
+
 import discord
 from discord.ext import commands
 from openai import AsyncOpenAI
-import os
-import argparse
-from typing import List, Dict, Any
 
-from conversations import Conversation, ConversationManager
+from conversations import ConversationManager
 from database import Database
 
 # --- Command Line Arguments ---
@@ -35,7 +34,8 @@ parser.add_argument(
     '--db', default='conversations.db', help='SQLite DB to use.',
 )
 parser.add_argument(
-    '--discord_token', required=True, help='The Discord bot token.',
+    '--discord_token', default=os.environ.get("DISCORD_TOKEN"),
+    help='The Discord bot token.',
 )
 args = parser.parse_args()
 
@@ -180,16 +180,14 @@ async def on_reaction_add(reaction, user):
 async def newchat(
     interaction: discord.Interaction,
     prompt: str = None,
-    web_fetch: bool = False,
 ):
     await interaction.response.defer()
     channel_id = interaction.channel_id
+    print(f'{channel_id}_ {interaction.user} newchat with: {prompt}')
     old_convo = await bot.manager.get(channel_id, create_if_missing=False)
     if old_convo:
         await clear_reactions(interaction.channel, old_convo.last_messages)
-    conversation = await bot.manager.new_conversation(
-        channel_id, prompt, web_fetch
-    )
+    conversation = await bot.manager.new_conversation(channel_id, prompt)
     await interaction.followup.send(
         f'Starting a new chat with {conversation.bot_name}: '
         f'"{conversation.prompt}"'
@@ -202,12 +200,11 @@ async def newchat(
 async def changeprompt(
     interaction: discord.Interaction,
     prompt: str,
-    web_fetch: bool = False,
 ):
     await interaction.response.defer()
     channel_id = interaction.channel_id
     conversation = await bot.manager.get(channel_id)
-    await conversation.update_prompt(prompt, web_fetch)
+    await conversation.update_prompt(prompt)
     await interaction.followup.send(
         f'Now chatting with {conversation.bot_name}: '
         f'"{conversation.prompt}"'
