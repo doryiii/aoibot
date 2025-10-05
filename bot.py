@@ -15,9 +15,6 @@ parser.add_argument(
     help='The base URL for the OpenAI API server.',
 )
 parser.add_argument(
-    '--api_key', default='', help='The API key for OpenAI API.',
-)
-parser.add_argument(
     '--model', default='', help='The model to use from OpenAI API.',
 )
 parser.add_argument(
@@ -33,10 +30,6 @@ parser.add_argument(
 parser.add_argument(
     '--db', default='conversations.db', help='SQLite DB to use.',
 )
-parser.add_argument(
-    '--discord_token', default=os.environ.get("DISCORD_TOKEN"),
-    help='The Discord bot token.',
-)
 args = parser.parse_args()
 
 # --- Bot Setup ---
@@ -44,7 +37,10 @@ args = parser.parse_args()
 class AoiBot(commands.Bot):
     async def setup_hook(self):
         db = Database.get(args.db)
-        openai = AsyncOpenAI(base_url=args.base_url, api_key=args.api_key)
+        openai = AsyncOpenAI(
+            base_url=args.base_url,
+            api_key=os.environ.get("OPENAI_API_KEY") or ""
+        )
         self.manager = ConversationManager(
             openai, args.model, db, args.default_prompt,
         )
@@ -169,7 +165,7 @@ async def on_reaction_add(reaction, user):
                 await conversation.save()
     except Exception as e:
         print(f'An error occurred: {e}')
-        await message.reply('Sorry, I had a little hiccup. Baka!')
+        await channel.send('Sorry, I had a little hiccup. Baka!')
 
 
 # --- Slash Commands ---
@@ -180,6 +176,7 @@ async def on_reaction_add(reaction, user):
 async def newchat(
     interaction: discord.Interaction,
     prompt: str = None,
+    web_access: bool = False,
 ):
     await interaction.response.defer()
     channel_id = interaction.channel_id
@@ -187,7 +184,9 @@ async def newchat(
     old_convo = await bot.manager.get(channel_id, create_if_missing=False)
     if old_convo:
         await clear_reactions(interaction.channel, old_convo.last_messages)
-    conversation = await bot.manager.new_conversation(channel_id, prompt)
+    conversation = await bot.manager.new_conversation(
+        channel_id, prompt, web_access
+    )
     await interaction.followup.send(
         f'Starting a new chat with {conversation.bot_name}: '
         f'"{conversation.prompt}"'
@@ -200,11 +199,12 @@ async def newchat(
 async def changeprompt(
     interaction: discord.Interaction,
     prompt: str,
+    web_access: bool | None = None,
 ):
     await interaction.response.defer()
     channel_id = interaction.channel_id
     conversation = await bot.manager.get(channel_id)
-    await conversation.update_prompt(prompt)
+    await conversation.update_prompt(prompt, web_access)
     await interaction.followup.send(
         f'Now chatting with {conversation.bot_name}: '
         f'"{conversation.prompt}"'
@@ -213,4 +213,4 @@ async def changeprompt(
 
 # --- Running the Bot ---
 if __name__ == '__main__':
-    bot.run(args.discord_token)
+    bot.run(os.environ.get("DISCORD_TOKEN") or "")

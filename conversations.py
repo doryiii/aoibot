@@ -1,5 +1,6 @@
 import aiohttp
 import base64
+import functools
 import html2text
 import inspect
 import json
@@ -25,6 +26,7 @@ async def get_name(client, model, prompt):
 
 class Tools:
     @classmethod
+    @functools.cache
     def tools(cls):
         tools = []
         for name in dir(cls):
@@ -80,7 +82,7 @@ class Tools:
             "query": {"type": "string", "description": "the web search query"},
             "num_results": {
                 "type": "integer",
-                "description": "how many pages to return. Default is 5"}
+                "description": "how many sites to return. Default is 5"}
         }
         """
         res = requests.post(
@@ -91,7 +93,15 @@ class Tools:
                 "Authorization": f"Bearer {os.environ.get("LANGSEARCH_API_KEY")}",
             },
         ).json()
-        return json.dumps(res)
+        cleaned_res = [
+            {
+                "name": pg["name"],
+                "url": pg["url"],
+                "summary": pg["summary"] or pg["snippet"],
+            }
+            for pg in res["data"]["webPages"]["value"]
+        ]
+        return json.dumps(cleaned_res)
 
 
 class ConversationManager:
@@ -102,28 +112,27 @@ class ConversationManager:
         self.db = db
         self.default_prompt = default_prompt
 
-    async def get(self, key, create_if_missing=True):
+    async def get(self, key, create_if_missing = True):
         """Gets a conversation based on |key|, optionally create when not found."""
         convo_data = self.db.get_conversation(key)
         if convo_data:
-            prompt, extra_prompt, history, bot_name, last_messages = convo_data
-            del extra_prompt
+            prompt, web_access, history, bot_name, last_messages = convo_data
             return Conversation(
-                key, bot_name, prompt, history, last_messages,
+                key, bot_name, prompt, web_access, history, last_messages,
                 self.client, self.model, self.db,
             )
         if create_if_missing:
             return await self.new_conversation(key, self.default_prompt)
         return None
 
-    async def new_conversation(self, key, prompt = None):
+    async def new_conversation(self, key, prompt = None, web_access = False):
         """Creates a new Conversation with key based on given prompt."""
         prompt = prompt or self.default_prompt
         name = await get_name(self.client, self.model, prompt)
         history = []
         last_messages = []
         convo = Conversation(
-            key, name, prompt, history, last_messages,
+            key, name, prompt, web_access, history, last_messages,
             self.client, self.model, self.db,
         )
         await convo.save()
@@ -134,13 +143,14 @@ class Conversation:
     """Holds data about a conversation thread."""
     def __init__(
         self,
-        convo_id, name, prompt,
+        convo_id, name, prompt, web_access,
         history, last_messages,
         api_client, model, db,
     ):
         self.id = convo_id
         self.bot_name = name
         self.prompt = prompt
+        self.web_access = web_access
         self.history = history
         self.last_messages = last_messages
         self.client = api_client
@@ -150,20 +160,26 @@ class Conversation:
     async def save(self):
         """Saves the conversation to the DB."""
         self.db.save(
-            self.id, self.prompt, "",  # TODO remove extra_prompt from DB
+            self.id, self.prompt, self.web_access,
             self.history, self.bot_name, self.last_messages
         )
 
     async def pop(self):
-        """Removes one user/assistant converation turn pair."""
-        if len(self.history) >= 3:
-            self.history = self.history[:-2]
-            await self.save()
+        """Removes the last user turn and all subsequent assistant turns."""
+        while self.history:
+            current = self.history.pop()
+            if current["role"] == "user":
+                await self.save()
+                return current
+        await self.save()
+        return None
 
-    async def update_prompt(self, prompt):
+    async def update_prompt(self, prompt, web_access = None):
         """Changes current prompt to a new one, keeping the rest of history."""
         self.prompt = prompt
         self.bot_name = await get_name(self.client, self.model, prompt)
+        if web_access is not None:
+            self.web_access = web_access
         await self.save()
 
     async def generate(self, text, media=tuple()):
@@ -193,7 +209,11 @@ class Conversation:
                     print(f"Error downloading or processing attachment: {e}")
 
         # send request to openai api and return response
-        to_sends = [[{"role": "user", "content": openai_content}]]
+        user_turn = {"role": "user", "content": openai_content}
+        return await self._generate([user_turn])
+
+    async def _generate(self, user_turns):
+        to_sends = [user_turns]
         while to_sends:
             to_send = to_sends.pop(0)
             request = (
@@ -201,7 +221,8 @@ class Conversation:
                 + self.history + to_send
             )
             llm_response = await self.client.chat.completions.create(
-                model=MODEL, messages=request, tools=Tools.tools(),
+                model=MODEL, messages=request,
+                tools=Tools.tools() if self.web_access else None,
                 stream=False, extra_body={"cache_prompt": True},
             )
             llm_response = llm_response.choices[0].message
@@ -225,14 +246,7 @@ class Conversation:
                 to_sends.append(tool_results)
         return llm_response.content
 
-
-    # TODO: find the first "user" message from the back of history, then delete everything after that and retry
     async def regenerate(self):
         """Regenerates the last assistant turn."""
-        llm_response = await self.client.chat.completions.create(
-            model=MODEL, messages=self.history[:-1]
-        )
-        response = llm_response.choices[0].message.content
-        self.history[-1] = {"role": "assistant", "content": response}
-        return response
-
+        last_user_turn = await self.pop()
+        return await self._generate([last_user_turn])

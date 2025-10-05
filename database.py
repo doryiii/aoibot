@@ -18,7 +18,7 @@ class Database:
                 CREATE TABLE IF NOT EXISTS conversations (
                     id TEXT PRIMARY KEY,
                     prompt TEXT NOT NULL,
-                    extra_prompt TEXT NOT NULL,
+                    web_access BOOLEAN NOT NULL,
                     history TEXT NOT NULL,
                     bot_name TEXT NOT NULL,
                     last_messages TEXT NOT NULL
@@ -29,31 +29,31 @@ class Database:
         with self.conn:
             cursor = self.conn.cursor()
             cursor.execute(
-                "SELECT prompt, extra_prompt, history, bot_name, last_messages "
+                "SELECT prompt, web_access, history, bot_name, last_messages "
                 "FROM conversations WHERE id = ?",
                 (conversation_id,)
             )
             row = cursor.fetchone()
             if row:
                 prompt = row[0]
-                extra_prompt = row[1]
+                web_access = row[1]
                 history = json.loads(row[2])
                 bot_name = row[3]
                 last_messages = json.loads(row[4])
-                return prompt, extra_prompt, history, bot_name, last_messages
+                return prompt, web_access, history, bot_name, last_messages
             return None
 
     def save(
-        self, conversation_id, prompt, extra_prompt,
+        self, conversation_id, prompt, web_access,
         history, bot_name, last_messages
     ):
         with self.conn:
             self.conn.execute(
                 "INSERT OR REPLACE INTO conversations "
-                "(id, prompt, extra_prompt, history, bot_name, last_messages) "
+                "(id, prompt, web_access, history, bot_name, last_messages) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
                 (
-                    conversation_id, prompt, extra_prompt, json.dumps(history),
+                    conversation_id, prompt, web_access, json.dumps(history),
                     bot_name, json.dumps(last_messages)
                 ),
             )
