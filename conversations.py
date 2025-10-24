@@ -7,21 +7,20 @@ import json
 import os
 import requests
 
-API_KEY = "eh"
-MODEL = "p620"
+from llm_client import LLMClient
+
 DEFAULT_NAME = "Aoi"
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
 
-async def get_name(client, model, prompt):
+async def get_name(client: LLMClient, prompt):
     """Generates an assistant name for the given prompt."""
-    name_response = await client.chat.completions.create(
-        model=model,
+    name_response = await client.chat(
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": NAME_PROMPT}
         ],
     )
-    return name_response.choices[0].message.content.split('\n')[0]
+    return name_response['choices'][0]['message']['content'].split('\n')[0]
 
 
 class Tools:
@@ -65,7 +64,6 @@ class Tools:
     @classmethod
     def web_fetch(cls, url):
         """Get content of a webpage.
-
         {"url": {"type": "string", "description": "the webpage URL to fetch"}}
         """
         if not url.startswith(("http://", "https://")):
@@ -77,7 +75,6 @@ class Tools:
     @classmethod
     def web_search(cls, query, num_results=5):
         """Search the web.
-
         {
             "query": {"type": "string", "description": "the web search query"},
             "num_results": {
@@ -106,9 +103,8 @@ class Tools:
 
 class ConversationManager:
     """Creates and retrieves Conversations."""
-    def __init__(self, openai_client, model, db, default_prompt):
-        self.model = model
-        self.client = openai_client
+    def __init__(self, llm_client, db, default_prompt):
+        self.client = llm_client
         self.db = db
         self.default_prompt = default_prompt
 
@@ -119,7 +115,7 @@ class ConversationManager:
             prompt, web_access, history, bot_name, last_messages = convo_data
             return Conversation(
                 key, bot_name, prompt, web_access, history, last_messages,
-                self.client, self.model, self.db,
+                self.client, self.db,
             )
         if create_if_missing:
             return await self.new_conversation(key, self.default_prompt)
@@ -128,12 +124,12 @@ class ConversationManager:
     async def new_conversation(self, key, prompt = None, web_access = False):
         """Creates a new Conversation with key based on given prompt."""
         prompt = prompt or self.default_prompt
-        name = await get_name(self.client, self.model, prompt)
+        name = await get_name(self.client, prompt)
         history = []
         last_messages = []
         convo = Conversation(
             key, name, prompt, web_access, history, last_messages,
-            self.client, self.model, self.db,
+            self.client, self.db,
         )
         await convo.save()
         return convo
@@ -145,7 +141,7 @@ class Conversation:
         self,
         convo_id, name, prompt, web_access,
         history, last_messages,
-        api_client, model, db,
+        api_client, db,
     ):
         self.id = convo_id
         self.bot_name = name
@@ -154,7 +150,6 @@ class Conversation:
         self.history = history
         self.last_messages = last_messages
         self.client = api_client
-        self.model = model
         self.db = db
 
     async def save(self):
@@ -177,7 +172,7 @@ class Conversation:
     async def update_prompt(self, prompt, web_access = None):
         """Changes current prompt to a new one, keeping the rest of history."""
         self.prompt = prompt
-        self.bot_name = await get_name(self.client, self.model, prompt)
+        self.bot_name = await get_name(self.client, prompt)
         if web_access is not None:
             self.web_access = web_access
         await self.save()
@@ -220,33 +215,34 @@ class Conversation:
                 [{"role": "system", "content": self.prompt}]
                 + self.history + to_send
             )
-            llm_response = await self.client.chat.completions.create(
-                model=MODEL, messages=request,
+            llm_response = await self.client.chat(
+                messages=request,
                 tools=Tools.tools() if self.web_access else None,
                 stream=False, extra_body={"cache_prompt": True},
             )
-            llm_response = llm_response.choices[0].message
+            llm_response = llm_response['choices'][0]['message']
             self.history.extend(to_send)
-            self.history.append({k:v for k, v in llm_response.model_dump().items() if v})
+            self.history.append({k:v for k, v in llm_response.items() if v})
 
             # check for tool calls
-            if llm_response.tool_calls:
+            if 'tool_calls' in llm_response and llm_response['tool_calls']:
                 tool_results = []
-                for tool_call in llm_response.tool_calls:
-                    print(f"calling {tool_call.function}... ")
+                for tool_call in llm_response['tool_calls']:
+                    print(f"calling {tool_call['function']}... ")
                     tool_result_text = Tools.call(
-                        tool_call.function.name,
-                        **json.loads(tool_call.function.arguments)
+                        tool_call['function']['name'],
+                        **json.loads(tool_call['function']['arguments'])
                     )
                     tool_results.append({
                         "role": "tool",
-                        "tool_call_id": tool_call.id,
+                        "tool_call_id": tool_call['id'],
                         "content": tool_result_text,
                     })
                 to_sends.append(tool_results)
-        return llm_response.content
+        return llm_response['content']
 
     async def regenerate(self):
         """Regenerates the last assistant turn."""
         last_user_turn = await self.pop()
         return await self._generate([last_user_turn])
+

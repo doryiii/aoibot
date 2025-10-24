@@ -1,3 +1,2 @@
 discord
-openai
-git+https://github.com/m92vyas/llm-reader
+aiohttp

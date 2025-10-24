@@ -3,10 +3,10 @@ import os
 
 import discord
 from discord.ext import commands
-from openai import AsyncOpenAI
 
 from conversations import ConversationManager
 from database import Database
+from llm_client import LLMClient
 
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description='Aoi Discord Bot')
@@ -37,13 +37,15 @@ args = parser.parse_args()
 class AoiBot(commands.Bot):
     async def setup_hook(self):
         db = Database.get(args.db)
-        openai = AsyncOpenAI(
+        self.llm_client = LLMClient(
             base_url=args.base_url,
+            model=args.model,
             api_key=os.environ.get("OPENAI_API_KEY") or ""
         )
         self.manager = ConversationManager(
-            openai, args.model, db, args.default_prompt,
+            self.llm_client, db, args.default_prompt,
         )
+
 intents = discord.Intents.default()
 intents.messages = True
 intents.message_content = True
