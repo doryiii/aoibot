@@ -1,13 +1,9 @@
 import aiohttp
 import base64
-import functools
-import html2text
-import inspect
 import json
-import os
-import requests
 
 from llm_client import LLMClient
+from tools import Tools
 
 DEFAULT_NAME = "Aoi"
 NAME_PROMPT = "reply with your name, nothing else, no punctuation"
@@ -21,85 +17,6 @@ async def get_name(client: LLMClient, prompt):
         ],
     )
     return name_response['choices'][0]['message']['content'].split('\n')[0]
-
-
-class Tools:
-    @classmethod
-    @functools.cache
-    def tools(cls):
-        tools = []
-        for name in dir(cls):
-            if name.startswith("_") or name == "tools" or name == "call":
-                continue
-            f = getattr(cls, name)
-            if not callable(f):
-                continue
-            desc, docparams = inspect.getdoc(f).split("\n", 1)
-            docparams = json.loads(docparams)
-            sigparams = inspect.signature(f).parameters
-            requiredparams = [
-                p for p in docparams
-                if sigparams[p].default is inspect.Parameter.empty
-            ]
-            tools.append({
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": desc,
-                    "parameters": {
-                        "type": "object",
-                        "properties": docparams,
-                        "required": requiredparams,
-                    },
-                },
-            })
-        return tools
-
-    @classmethod
-    def call(cls, method, **kwargs):
-        if method not in [f["function"]["name"] for f in cls.tools()]:
-            raise ValueError(f"unknown method: {method}")
-        return getattr(cls, method)(**kwargs)
-
-    @classmethod
-    def web_fetch(cls, url):
-        """Get content of a webpage.
-        {"url": {"type": "string", "description": "the webpage URL to fetch"}}
-        """
-        if not url.startswith(("http://", "https://")):
-            url = "https://" + url
-        webres = requests.get(url)
-        webres.raise_for_status()
-        return html2text.html2text(webres.text)
-
-    @classmethod
-    def web_search(cls, query, num_results=5):
-        """Search the web.
-        {
-            "query": {"type": "string", "description": "the web search query"},
-            "num_results": {
-                "type": "integer",
-                "description": "how many sites to return. Default is 5"}
-        }
-        """
-        res = requests.post(
-            "https://api.langsearch.com/v1/web-search",
-            json={"query": query, "summary": True, "count": num_results},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {os.environ.get("LANGSEARCH_API_KEY")}",
-            },
-        ).json()
-        cleaned_res = [
-            {
-                "name": pg["name"],
-                "url": pg["url"],
-                "summary": pg["summary"] or pg["snippet"],
-            }
-            for pg in res["data"]["webPages"]["value"]
-        ]
-        return json.dumps(cleaned_res)
-
 
 class ConversationManager:
     """Creates and retrieves Conversations."""
@@ -151,6 +68,7 @@ class Conversation:
         self.last_messages = last_messages
         self.client = api_client
         self.db = db
+        self.tools = Tools()
 
     async def save(self):
         """Saves the conversation to the DB."""
@@ -217,7 +135,7 @@ class Conversation:
             )
             llm_response = await self.client.chat(
                 messages=request,
-                tools=Tools.tools() if self.web_access else None,
+                tools=self.tools.tools() if self.web_access else None,
                 stream=False, extra_body={"cache_prompt": True},
             )
             llm_response = llm_response['choices'][0]['message']
@@ -229,7 +147,7 @@ class Conversation:
                 tool_results = []
                 for tool_call in llm_response['tool_calls']:
                     print(f"calling {tool_call['function']}... ")
-                    tool_result_text = Tools.call(
+                    tool_result_text = self.tools.call(
                         tool_call['function']['name'],
                         **json.loads(tool_call['function']['arguments'])
                     )
