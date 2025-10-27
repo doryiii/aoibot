@@ -1,2 +1,5 @@
 discord
 aiohttp
+html2text
+requests
+pydantic
