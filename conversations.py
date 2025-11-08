@@ -6,18 +6,21 @@ from llm_client import LLMClient
 from tools import Tools
 
 DEFAULT_NAME = "Aoi"
-NAME_PROMPT = "reply with your name, nothing else, no punctuation"
+#NAME_PROMPT = "reply with your name, nothing else, no punctuation"
+NAME_PROMPT = """reply with your name if given in the system prompt.
+If no name is given in the system prompt, come up with a name fitting for you.
+Reply with just the name, nothing else, no punctuation.""".strip()
 
 
 async def get_name(client: LLMClient, prompt):
   """Generates an assistant name for the given prompt."""
-  name_response = await client.chat(
+  response = await client.chat(
       messages=[
           {"role": "system", "content": prompt},
           {"role": "user", "content": NAME_PROMPT}
       ],
   )
-  return name_response['choices'][0]['message']['content'].split('\n')[0]
+  return response['choices'][0]['message']['content'].strip().split('\n')[0]
 
 
 class ConversationManager:
@@ -140,7 +143,7 @@ class Conversation:
       llm_response = await self.client.chat(
           messages=request,
           tools=self.tools.tools() if self.web_access else None,
-          stream=False, extra_body={"cache_prompt": True},
+          extra_body={"cache_prompt": True},
       )
       llm_response = llm_response['choices'][0]['message']
       self.history.extend(to_send)

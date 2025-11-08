@@ -8,12 +8,12 @@ class LLMClient:
     self.model = model
     self.api_key = api_key
 
-  async def chat(self, messages, tools=None, stream=False, extra_body=None):
+  async def chat(self, messages, tools=None, extra_body=None):
     """Makes a chat completion request to the LLM server."""
     payload = {
         "model": self.model,
         "messages": messages,
-        "stream": stream,
+        "stream": False,
     }
     if tools:
       payload["tools"] = tools
