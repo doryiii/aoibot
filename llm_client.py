@@ -3,10 +3,11 @@ import json
 
 
 class LLMClient:
-  def __init__(self, base_url, model, api_key="eh"):
+  def __init__(self, base_url, model, api_key="eh", backup_url=None):
     self.base_url = base_url
     self.model = model
     self.api_key = api_key
+    self.backup_url = backup_url
 
   async def chat(self, messages, tools=None, extra_body=None):
     """Makes a chat completion request to the LLM server."""
@@ -25,11 +26,19 @@ class LLMClient:
         "Authorization": f"Bearer {self.api_key}",
     }
 
-    async with aiohttp.ClientSession() as session:
-      async with session.post(
-          f"{self.base_url}/chat/completions",
-          headers=headers,
-          data=json.dumps(payload),
-      ) as response:
-        response.raise_for_status()
-        return await response.json()
+    async with aiohttp.ClientSession(
+        raise_for_status=True, headers=headers,
+    ) as session:
+      try:
+        async with session.post(
+            f"{self.base_url}/chat/completions", data=json.dumps(payload),
+        ) as response:
+          return await response.json()
+
+      except (aiohttp.ClientConnectorError, aiohttp.ClientResponseError) as e:
+        if not self.backup_url:
+          raise e
+        async with session.post(
+            f"{self.backup_url}/chat/completions", data=json.dumps(payload),
+        ) as response:
+          return await response.json()

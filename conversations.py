@@ -2,7 +2,6 @@ import aiohttp
 import base64
 import json
 
-from llm_client import LLMClient
 from tools import Tools
 
 DEFAULT_NAME = "Aoi"
@@ -12,7 +11,7 @@ If no name is given in the system prompt, come up with a name fitting for you.
 Reply with just the name, nothing else, no punctuation.""".strip()
 
 
-async def get_name(client: LLMClient, prompt):
+async def get_name(client, prompt):
   """Generates an assistant name for the given prompt."""
   response = await client.chat(
       messages=[

@@ -11,8 +11,12 @@ from llm_client import LLMClient
 # --- Command Line Arguments ---
 parser = argparse.ArgumentParser(description='Aoi Discord Bot')
 parser.add_argument(
-    '--base_url', default='http://localhost:8080/v1',
+    '--base_url', required=True,
     help='The base URL for the OpenAI API server.',
+)
+parser.add_argument(
+    '--backup_base_url', default=None,
+    help='The backup base OpenAI API server to use if the main one is down.',
 )
 parser.add_argument(
     '--model', default='', help='The model to use from OpenAI API.',
@@ -38,13 +42,14 @@ args = parser.parse_args()
 class AoiBot(commands.Bot):
   async def setup_hook(self):
     db = Database.get(args.db)
-    self.llm_client = LLMClient(
+    llm_client = LLMClient(
         base_url=args.base_url,
         model=args.model,
-        api_key=os.environ.get("OPENAI_API_KEY") or ""
+        api_key=os.environ.get("OPENAI_API_KEY") or "",
+        backup_url=args.backup_base_url,
     )
     self.manager = ConversationManager(
-        self.llm_client, db, args.default_prompt,
+        llm_client, db, args.default_prompt,
     )
 
 
