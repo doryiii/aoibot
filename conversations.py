@@ -153,7 +153,8 @@ class Conversation:
         tool_results = []
         for tool_call in llm_response['tool_calls']:
           print(f"calling {tool_call['function']}... ")
-          tool_result_text = self.tools.call(
+          # Call may be async; await if needed
+          tool_result_text = await self.tools.call(
               tool_call['function']['name'],
               **json.loads(tool_call['function']['arguments'])
           )
